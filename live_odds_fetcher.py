@@ -11,9 +11,13 @@ Uses OddsAfrica-API for real-time data from:
 
 import json
 import os
+import queue
 import sys
+import threading
 import time
 from datetime import datetime
+
+LIVE_FEEDS_ENABLED = os.environ.get("LIVE_FEEDS_ENABLED", "0") == "1"
 
 # Supported betting sites with live feed capability
 SUPPORTED_LIVE_SITES = {
@@ -100,6 +104,7 @@ class LiveOddsFetcher:
     def __init__(self):
         self.cache = {}
         self.cache_duration = 30  # seconds
+        self.live_fetch_timeout = 8  # seconds
     
     def get_supported_sites(self):
         """Return list of sites with live feed capability"""
@@ -133,19 +138,23 @@ class LiveOddsFetcher:
             if (time.time() - cache_time) < self.cache_duration:
                 return cache_data
         
-        if not API_AVAILABLE or site_id not in API_INSTANCES:
+        if not LIVE_FEEDS_ENABLED or not API_AVAILABLE or site_id not in API_INSTANCES:
             return self._get_sample_data(site_id)
         
         try:
             api_instance = API_INSTANCES[site_id]
-            raw_data = api_instance.Get_games(sport)
+            raw_data = self._run_with_timeout(api_instance.Get_games, sport)
             
             if not raw_data:
-                return self._get_sample_data(site_id)
+                sample_data = self._get_sample_data(site_id)
+                self.cache[cache_key] = (time.time(), sample_data)
+                return sample_data
             
             matches = self._parse_api_response(raw_data, site_id)
             if not matches:
-                return self._get_sample_data(site_id)
+                sample_data = self._get_sample_data(site_id)
+                self.cache[cache_key] = (time.time(), sample_data)
+                return sample_data
             
             # Cache results
             self.cache[cache_key] = (time.time(), matches)
@@ -154,7 +163,31 @@ class LiveOddsFetcher:
             
         except Exception as e:
             print(f"Error fetching from {site_id}: {e}")
-            return self._get_sample_data(site_id)
+            sample_data = self._get_sample_data(site_id)
+            self.cache[cache_key] = (time.time(), sample_data)
+            return sample_data
+
+    def _run_with_timeout(self, func, *args):
+        """Run slow live scrapers with a hard response deadline."""
+        result_queue = queue.Queue(maxsize=1)
+
+        def target():
+            try:
+                result_queue.put((True, func(*args)))
+            except Exception as exc:
+                result_queue.put((False, exc))
+
+        worker = threading.Thread(target=target, daemon=True)
+        worker.start()
+        worker.join(self.live_fetch_timeout)
+
+        if worker.is_alive():
+            raise TimeoutError(f"Live feed timed out after {self.live_fetch_timeout}s")
+
+        ok, result = result_queue.get()
+        if ok:
+            return result
+        raise result
     
     def _parse_api_response(self, raw_data, site_id):
         """Parse the API response into a standardized format"""

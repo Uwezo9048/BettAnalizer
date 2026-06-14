@@ -15,7 +15,7 @@ app = Flask(__name__)
 CORS(app)
 
 from betting_ai import get_ai
-from live_odds_fetcher import get_fetcher, SUPPORTED_LIVE_SITES, API_AVAILABLE
+from live_odds_fetcher import get_fetcher, SUPPORTED_LIVE_SITES, API_AVAILABLE, LIVE_FEEDS_ENABLED
 
 ai = get_ai()
 fetcher = get_fetcher()
@@ -60,8 +60,8 @@ def get_matches():
             'site_flag': site_info['flag'],
             'matches': matches,
             'count': len(matches),
-            'is_live_data': API_AVAILABLE and not (matches and matches[0].get('sample', False)),
-            'api_available': API_AVAILABLE,
+            'is_live_data': LIVE_FEEDS_ENABLED and API_AVAILABLE and not (matches and matches[0].get('sample', False)),
+            'api_available': API_AVAILABLE and LIVE_FEEDS_ENABLED,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -174,7 +174,7 @@ def api_status():
     return jsonify({
         'oddsafrica_api_available': API_AVAILABLE,
         'supported_sites': list(SUPPORTED_LIVE_SITES.keys()),
-        'live_feeds_active': API_AVAILABLE,
+        'live_feeds_active': API_AVAILABLE and LIVE_FEEDS_ENABLED,
         'timestamp': datetime.now().isoformat()
     })
 
