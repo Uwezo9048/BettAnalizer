@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 
 LIVE_FEEDS_ENABLED = os.environ.get("LIVE_FEEDS_ENABLED", "0") == "1"
+API_IMPORT_ERROR = None
 
 # Supported betting sites with live feed capability
 SUPPORTED_LIVE_SITES = {
@@ -92,6 +93,7 @@ try:
     print("OddsAfrica-API loaded - Live feeds available for all sites.")
     
 except ImportError as e:
+    API_IMPORT_ERROR = str(e)
     print(f"OddsAfrica-API not available: {e}")
     print("   Install with: pip install git+https://github.com/PeterEkwere/OddsAfrica-API.git")
     API_AVAILABLE = False

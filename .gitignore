@@ -28,7 +28,6 @@ instance/
 Thumbs.db
 
 # Project specific
-OddsAfrica-API/
 engine/__pycache__/
 *.pyc
 
