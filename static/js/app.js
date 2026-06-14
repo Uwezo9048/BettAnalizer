@@ -50,8 +50,11 @@ async function checkAPIStatus() {
         if (data.live_feeds_active) {
             apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full live-indicator"></span> Live Feeds Active';
             apiStatusBadge.className = 'status-pill gradient-green';
-        } else if (data.oddsafrica_api_available) {
+        } else if (!data.live_feeds_enabled) {
             apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Demo Mode';
+            apiStatusBadge.className = 'status-pill bg-gray-800';
+        } else if (data.oddsafrica_api_available) {
+            apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Live Feeds Disabled';
             apiStatusBadge.className = 'status-pill bg-gray-800';
         } else {
             apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-red-500 rounded-full"></span> API Not Installed';

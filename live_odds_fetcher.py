@@ -118,7 +118,7 @@ class LiveOddsFetcher:
                 "country": site["country"],
                 "flag": site["flag"],
                 "is_default": site.get("is_default", False),
-                "live_feed": API_AVAILABLE
+                "live_feed": API_AVAILABLE and LIVE_FEEDS_ENABLED
             })
         return sites
     

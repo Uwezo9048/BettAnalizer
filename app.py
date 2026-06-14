@@ -180,6 +180,7 @@ def api_status():
     return jsonify({
         'oddsafrica_api_available': API_AVAILABLE,
         'oddsafrica_api_error': API_IMPORT_ERROR,
+        'live_feeds_enabled': LIVE_FEEDS_ENABLED,
         'supported_sites': list(SUPPORTED_LIVE_SITES.keys()),
         'live_feeds_active': API_AVAILABLE and LIVE_FEEDS_ENABLED,
         'timestamp': datetime.now().isoformat()
