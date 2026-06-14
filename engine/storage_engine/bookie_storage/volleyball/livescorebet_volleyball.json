@@ -1,0 +1,168 @@
+{
+  "Austria": {
+    "Austria Cup": {}
+  },
+  "Brazil": {
+    "Brazil Superliga": {
+      "Joinville vs Araguari Volei": {
+        "time": "2024-01-06 22:00:00",
+        "Winner": {
+          "1": 1.31746032,
+          "2": 3.3
+        }
+      }
+    },
+    "Brazil Superliga Women": {
+      "Sesc RJ [W] vs Praia Clube [W]": {
+        "time": "2024-01-06 21:30:00",
+        "Winner": {
+          "1": 2.1,
+          "2": 1.71428572
+        }
+      },
+      "Fluminense [W] vs Bluvolei [W]": {
+        "time": "2024-01-06 22:30:00",
+        "Winner": {
+          "1": 1.17391305,
+          "2": 4.45
+        }
+      },
+      "Osasco [W] vs Vivo Minas [W]": {
+        "time": "2024-01-07 00:00:00",
+        "Winner": {
+          "1": 2.5,
+          "2": 1.48780488
+        }
+      }
+    }
+  },
+  "Bulgaria": {
+    "Bulgaria Super League": {}
+  },
+  "China": {
+    "China CVL": {}
+  },
+  "Czech Republic": {
+    "Czech Extraliga Women": {}
+  },
+  "Europe": {
+    "Champions League": {},
+    "CEV Challenge Cup": {},
+    "CEV Cup": {},
+    "Baltic League": {}
+  },
+  "Finland": {
+    "Finland Mestaruusliiga Women": {
+      "LiigaPloki [W] vs Oriveden Ponnistus [W]": {
+        "time": "2024-01-06 15:00:00",
+        "Winner": {
+          "1": 1.60606061,
+          "2": 2.2
+        }
+      },
+      "Puijo Wolley [W] vs LP Kangasala [W]": {
+        "time": "2024-01-06 15:00:00",
+        "Winner": {
+          "1": 2.25,
+          "2": 1.55555556
+        }
+      }
+    }
+  },
+  "Greece": {
+    "Greece A1": {
+      "Milon vs Panathinaikos Athens": {
+        "time": "2024-01-06 18:30:00",
+        "Winner": {
+          "1": 3.35,
+          "2": 1.28985508
+        }
+      },
+      "AS Athlos Orestiadas vs AO Kalamata 80": {
+        "time": "2024-01-07 17:00:00",
+        "Winner": {
+          "1": 1.25641026,
+          "2": 3.6
+        }
+      },
+      "PAOK Saloniki vs Olympiacos Piraeus": {
+        "time": "2024-01-08 15:00:00",
+        "Winner": {
+          "1": 2.15,
+          "2": 1.64516129
+        }
+      },
+      "Pigasos Polichnis vs Foinikas Syros": {
+        "time": "2024-01-08 17:00:00",
+        "Winner": {
+          "1": 1.39215687,
+          "2": 2.8
+        }
+      }
+    }
+  },
+  "Israel": {
+    "Israel Premier League Women": {}
+  },
+  "Kazakhstan": {
+    "Kazakhstan National League Women": {}
+  },
+  "Poland": {
+    "Poland PLS": {
+      "ZAKSA Kedzierzyn-Kozle vs Jastrzebski Wegiel": {
+        "time": "2024-01-06 11:30:00",
+        "Winner": {
+          "1": 1.86956522,
+          "2": 1.86956522
+        }
+      },
+      "Trefl Gdansk vs Asseco Resovia Rzeszow": {
+        "time": "2024-01-06 13:45:00",
+        "Winner": {
+          "1": 3.1,
+          "2": 1.3773585
+        }
+      },
+      "Slepsk Suwalki vs AZS Olsztyn": {
+        "time": "2024-01-07 16:30:00",
+        "Winner": {
+          "1": 2.65,
+          "2": 1.46511628
+        }
+      },
+      "LUK Lublin vs GKS Katowice": {
+        "time": "2024-01-07 19:30:00",
+        "Winner": {
+          "1": 1.27027027,
+          "2": 3.65
+        }
+      }
+    },
+    "Poland Cup Women": {}
+  },
+  "Serbia": {
+    "Serbia Superliga Women": {}
+  },
+  "South Korea": {
+    "Korea V League": {},
+    "Korea V League Women": {}
+  },
+  "Spain": {
+    "Spain Superliga Women": {
+      "CV Ciutadella Menorca [W] vs Sanaya Libbys La Laguna [W]": {
+        "time": "2024-01-06 18:00:00",
+        "Winner": {
+          "1": 1.55555556,
+          "2": 2.35
+        }
+      },
+      "Cajasol Juvasa [W] vs Kiele Socuellamos [W]": {
+        "time": "2024-01-07 11:00:00",
+        "Winner": {
+          "1": 2.1,
+          "2": 1.71428572
+        }
+      }
+    }
+  }
+}

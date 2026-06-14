@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Betting Assistant - Live Feeds</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .gradient-header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); }
+        .gradient-green { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+        .gradient-purple { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .gradient-sporty { background: linear-gradient(135deg, #ff6b35, #f7931e); }
+        .gradient-bet9ja { background: linear-gradient(135deg, #e63946, #c1121f); }
+        .match-card { transition: all 0.2s ease; cursor: pointer; }
+        .match-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .live-indicator { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .loading-spinner { border: 3px solid #374151; border-top: 3px solid #8b5cf6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .site-dropdown { transition: all 0.2s ease; }
+        .site-dropdown:hover { background: #374151; }
+        .live-badge { background: linear-gradient(135deg, #10b981, #059669); }
+        .sample-badge { background: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <!-- Header -->
+    <header class="gradient-header shadow-xl sticky top-0 z-50">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex justify-between items-center flex-wrap gap-4">
+                <div>
+                    <h1 class="text-2xl font-bold bg-gradient-to-r from-green-400 to-purple-500 bg-clip-text text-transparent">
+                        🤖 AI Betting Assistant
+                    </h1>
+                    <p class="text-gray-400 text-sm">Live feeds from 6+ betting sites • AI value detection</p>
+                </div>
+                <div id="apiStatusBadge" class="px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2 bg-gray-700">
+                    <span class="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                    Checking API...
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container mx-auto px-6 py-8">
+        <!-- Site Selection Dropdown -->
+        <div class="mb-8">
+            <div class="bg-gray-800 rounded-xl shadow-xl overflow-hidden">
+                <div class="p-5">
+                    <h2 class="text-xl font-bold mb-3">🔍 Select Betting Site</h2>
+                    <p class="text-gray-400 text-sm mb-4">Choose from sites with live feed support (powered by OddsAfrica-API)</p>
+                    
+                    <!-- Dropdown Search -->
+                    <div class="relative">
+                        <div class="relative">
+                            <input type="text" id="siteSearchInput" 
+                                placeholder="Search or select a betting site..."
+                                autocomplete="off"
+                                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 pl-10 text-white focus:outline-none focus:border-purple-500">
+                            <span class="absolute left-3 top-3 text-gray-400">🔎</span>
+                            <span class="absolute right-3 top-3 text-gray-400">▼</span>
+                        </div>
+                        
+                        <!-- Dropdown Menu -->
+                        <div id="siteDropdown" class="hidden absolute w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-y-auto">
+                            <div id="dropdownItems" class="py-2">
+                                <!-- Site items will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Selected Site Display -->
+                    <div id="selectedSiteDisplay" class="mt-4 p-3 rounded-lg gradient-sporty">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <span class="text-2xl mr-2">🇰🇪</span>
+                                <span class="font-bold">SportyBet</span>
+                                <span class="text-xs ml-2 opacity-80">Default</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="w-2 h-2 bg-green-500 rounded-full live-indicator"></span>
+                                <span class="text-sm" id="liveStatusText">Live Feed Active</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3 flex justify-between items-center">
+                        <div class="text-xs text-gray-400" id="siteInfoText">
+                            💡 SportyBet provides live odds via OddsAfrica-API
+                        </div>
+                        <button id="refreshBtn" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm transition">
+                            🔄 Refresh Odds
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Two Column Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- LEFT COLUMN: Matches List -->
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-gray-800 rounded-xl shadow-xl overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <div>
+                            <h2 class="text-xl font-bold">⚽ LIVE MATCHES & ODDS</h2>
+                            <p class="text-gray-400 text-sm" id="matchesSourceText">Fetching odds from SportyBet...</p>
+                        </div>
+                        <div class="text-xs text-gray-500" id="matchesCount"></div>
+                    </div>
+                    <div id="matchesContainer" class="divide-y divide-gray-700 max-h-[600px] overflow-y-auto">
+                        <div class="p-8 text-center">
+                            <div class="loading-spinner"></div>
+                            <p class="text-gray-400 mt-2">Loading matches...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: AI Analysis Panel -->
+            <div class="space-y-6">
+                <!-- AI Selection Panel -->
+                <div class="bg-gray-800 rounded-xl shadow-xl overflow-hidden sticky top-20">
+                    <div class="gradient-purple px-6 py-4">
+                        <h2 class="text-xl font-bold">🎯 AI SELECTION</h2>
+                        <p class="text-purple-200 text-sm">Best value bet from AI analysis</p>
+                    </div>
+                    <div id="aiSelectionPanel" class="p-5">
+                        <div class="text-center text-gray-400 py-8">
+                            Select a match to see AI analysis
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Stats -->
+                <div class="bg-gray-800 rounded-xl shadow-xl overflow-hidden">
+                    <div class="bg-gray-700 px-6 py-3">
+                        <h2 class="text-xl font-bold">📊 Quick Stats</h2>
+                    </div>
+                    <div class="p-5">
+                        <div class="grid grid-cols-2 gap-4 text-center">
+                            <div>
+                                <div class="text-2xl font-bold text-purple-400" id="matchesCountDisplay">0</div>
+                                <div class="text-xs text-gray-400">Matches</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-green-400" id="valueBetsCount">0</div>
+                                <div class="text-xs text-gray-400">Value Bets</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manual Entry Panel -->
+                <div class="bg-gray-800 rounded-xl shadow-xl overflow-hidden">
+                    <div class="bg-green-600/20 px-6 py-3">
+                        <h2 class="text-xl font-bold">✏️ MANUAL ENTRY</h2>
+                        <p class="text-gray-400 text-sm">Enter odds from any site manually</p>
+                    </div>
+                    <div class="p-5 space-y-3">
+                        <div class="grid grid-cols-2 gap-2">
+                            <input type="text" id="manualHomeTeam" placeholder="Home Team" class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+                            <input type="text" id="manualAwayTeam" placeholder="Away Team" class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+                        </div>
+                        <select id="manualMarket" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+                            <option value="1X2">1X2 - Match Winner</option>
+                            <option value="Over/Under">Over/Under Goals</option>
+                            <option value="GG/NG">Both Teams to Score</option>
+                            <option value="Double Chance">Double Chance</option>
+                        </select>
+                        <input type="text" id="manualOutcome" placeholder="Outcome (e.g., Home, Over 2.5)" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+                        <input type="number" id="manualOdds" step="0.01" placeholder="Odds" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+                        <button id="manualPredictBtn" class="w-full bg-green-600 hover:bg-green-700 py-2 rounded-lg font-semibold text-sm transition">
+                            🔮 AI Predict
+                        </button>
+                        <div id="manualResult" class="hidden mt-3 p-3 bg-gray-700 rounded-lg text-sm"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Global Analysis Button -->
+        <div class="mt-8">
+            <button id="analyzeAllBtn" class="w-full bg-purple-600 hover:bg-purple-700 py-3 rounded-xl font-bold text-lg transition">
+                🤖 ANALYZE ALL MATCHES - FIND BEST VALUE BETS
+            </button>
+        </div>
+
+        <!-- Global Results Panel -->
+        <div id="globalResults" class="hidden mt-6 bg-gray-800 rounded-xl shadow-xl overflow-hidden">
+            <div class="bg-purple-600/20 px-6 py-3">
+                <h2 class="text-xl font-bold">🏆 TOP VALUE BETS</h2>
+                <p class="text-gray-400 text-sm">Across all matches from selected site</p>
+            </div>
+            <div id="globalResultsContainer" class="p-5 max-h-96 overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
