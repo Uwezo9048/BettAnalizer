@@ -3,133 +3,77 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SportyBet AI Assistant</title>
+    <title>BetAnalyzer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <header class="sporty-header">
-        <div class="sporty-topbar">
-            <div class="brand-cluster">
-                <a href="/" class="sporty-logo" aria-label="SportyBet AI home">SportyBet</a>
-                <span class="country-flag">🇰🇪</span>
-                <span class="country-name">Kenya</span>
-                <span class="gear-dot">⚙</span>
+    <header class="app-header">
+        <div class="header-inner">
+            <div class="brand-block">
+                <a href="/" class="brand-logo" aria-label="BetAnalyzer home">
+                    <span class="brand-mark">BA</span>
+                    <span>BetAnalyzer</span>
+                </a>
+                <p>Live odds scanning, value-bet detection, and betslip risk checks</p>
             </div>
-            <div class="account-cluster">
+            <div class="header-actions">
                 <div id="apiStatusBadge" class="status-pill">
-                    <span class="w-2 h-2 bg-yellow-400 rounded-full"></span>
+                    <span class="w-2 h-2 bg-yellow-500 rounded-full"></span>
                     Checking API...
                 </div>
-                <span class="balance-chip">KES 0.03</span>
-                <button id="refreshBtn" class="header-link">Refresh</button>
-                <button class="header-link">Deposit</button>
-                <button class="header-link">Bet History</button>
-                <button class="header-link">My Account</button>
+                <button id="refreshBtn" class="primary-action">Refresh Odds</button>
             </div>
         </div>
-
-        <nav class="product-tabs" aria-label="Main navigation">
-            <button class="product-tab active">Sports</button>
-            <button class="product-tab">Games</button>
-            <button class="product-tab">Live Betting</button>
-            <button class="product-tab">Scheduled Virtuals</button>
-            <button class="product-tab">Jackpot</button>
-            <button class="product-tab">Livescore</button>
-            <button class="product-tab">Results</button>
-            <button class="product-tab">Promotions</button>
-            <button class="product-tab">Sporty Loyalty</button>
-            <button class="product-tab app-tab">App</button>
-            <button class="product-tab">GMT+03:00</button>
-        </nav>
     </header>
 
-    <div class="sport-strip">
-        <div id="sportsGrid" class="sports-grid">
-            <div class="text-sm text-gray-500">Loading sports...</div>
-        </div>
-    </div>
-
-    <main class="sporty-main">
-        <section class="promo-shell">
-            <aside class="popular-panel">
-                <h2>Popular</h2>
-                <button>Today's Football</button>
-                <button>Football in Next 3 Hours</button>
-                <button>World Cup</button>
-                <button>NBA</button>
-                <button>NHL</button>
-                <button>MLB</button>
-            </aside>
-
-            <div class="promo-board">
-                <div class="match-poster">
-                    <div class="shirt shirt-red">11</div>
-                    <div class="shirt shirt-white">10</div>
-                </div>
-                <div class="promo-copy">
-                    <div class="flag-row">
-                        <span>BEL</span>
-                        <span>EGY</span>
-                    </div>
-                    <h1>Belgium <span>vs</span> Egypt</h1>
-                    <p>World Cup Group G</p>
-                    <button type="button">Watch & Bet Now</button>
-                </div>
-                <div class="slide-dots"><span></span><span class="active"></span></div>
+    <main class="app-main">
+        <section class="control-panel">
+            <div class="control-copy">
+                <h1>Analyze live markets</h1>
+                <p>Choose a bookmaker and sport, then review live odds, upcoming matches, AI selections, and slip risk in one workspace.</p>
             </div>
 
-            <aside class="ad-panel" aria-label="Promotion placeholder">
-                <div class="ad-mark">S</div>
-            </aside>
+            <div class="site-search-panel">
+                <label for="siteSearchInput">Betting site</label>
+                <input type="text" id="siteSearchInput"
+                    placeholder="Search SportyBet, Bet9ja, 22Bet..."
+                    autocomplete="off"
+                    class="form-control w-full">
+                <div id="siteGrid" class="site-grid mt-3"></div>
+                <div id="siteDropdown" class="hidden"></div>
+                <div id="dropdownItems" class="hidden"></div>
+                <div id="selectedSiteDisplay" class="selected-site gradient-sporty">
+                    <div class="flex justify-between items-center gap-2">
+                        <span class="font-bold">SportyBet</span>
+                        <span class="text-sm" id="liveStatusText">Ready</span>
+                    </div>
+                </div>
+                <div class="site-note" id="siteInfoText">SportyBet selected.</div>
+            </div>
         </section>
 
-        <section class="virtual-banner">
-            <strong>SportyBet</strong>
-            <span>Virtual World</span>
-            <em>Bet on every second</em>
-            <button type="button">Bet Now</button>
+        <section class="sports-panel">
+            <div class="panel-label">Sports</div>
+            <div id="sportsGrid" class="sports-grid">
+                <div class="text-sm text-gray-400">Loading sports...</div>
+            </div>
         </section>
 
         <section class="workspace-grid">
-            <div class="content-column">
-                <section class="highlights-card">
-                    <div class="highlights-header">
-                        <div class="section-title">
-                            <span class="green-dot"></span>
-                            <div>
-                                <h2>Highlights</h2>
-                                <p id="matchesSourceText">Fetching odds from SportyBet...</p>
-                            </div>
-                        </div>
-                        <div class="utility-actions">
-                            <button type="button">Print</button>
-                            <button type="button" id="refreshMirror">Refresh</button>
-                        </div>
-                    </div>
-                    <div class="highlights-tabs">
-                        <span class="active">Football</span>
-                        <span>vFootball</span>
-                        <span>Basketball</span>
-                        <span>Tennis</span>
-                        <span>eFootball</span>
-                        <span>More Spo...</span>
-                        <span>Filter</span>
-                    </div>
-                    <div class="feed-heading">
+            <div class="main-feed">
+                <section class="dashboard-panel overflow-hidden">
+                    <div class="panel-header">
                         <div>
-                            <strong>Live Matches</strong>
-                            <small id="upcomingSourceText">Matches that are not live yet</small>
+                            <h2 class="panel-title">Live Matches & Odds</h2>
+                            <p class="panel-subtitle" id="matchesSourceText">Fetching odds from SportyBet...</p>
                         </div>
-                        <div class="feed-counts">
-                            <span id="matchesCount"></span>
-                            <span id="upcomingMatchesCount"></span>
-                        </div>
+                        <div class="count-pill" id="matchesCount"></div>
                     </div>
                     <div id="liveMatchesContainer" class="match-list">
                         <div class="p-8 text-center">
                             <div class="loading-spinner"></div>
-                            <p class="text-gray-500 mt-2">Loading matches...</p>
+                            <p class="text-gray-400 mt-2">Loading matches...</p>
                         </div>
                     </div>
                 </section>
@@ -138,12 +82,12 @@
                     <div class="panel-header">
                         <div>
                             <h2 class="panel-title">Upcoming Matches</h2>
-                            <p class="panel-subtitle">Matches that are not live yet</p>
+                            <p class="panel-subtitle" id="upcomingSourceText">Matches that are not live yet</p>
                         </div>
-                        <div class="count-pill" id="matchesCountDisplay">0</div>
+                        <div class="count-pill" id="upcomingMatchesCount"></div>
                     </div>
-                    <div id="upcomingMatchesContainer" class="match-list">
-                        <div class="p-8 text-center text-gray-500">Waiting for odds...</div>
+                    <div id="upcomingMatchesContainer" class="match-list tall">
+                        <div class="p-8 text-center text-gray-400">Waiting for odds...</div>
                     </div>
                 </section>
 
@@ -158,43 +102,38 @@
                 </section>
             </div>
 
-            <aside class="right-column">
-                <div class="betslip-card">
-                    <div class="betslip-tabs">
-                        <span class="active">Betslip</span>
-                        <span>Cashout</span>
-                        <small>2</small>
+            <aside class="right-rail">
+                <section class="dashboard-panel overflow-hidden">
+                    <div class="accent-header">
+                        <h2>AI Selection</h2>
+                        <p>Best value bet from the selected match</p>
                     </div>
-                    <div id="aiSelectionPanel" class="p-5 min-h-[150px]">
-                        <div class="text-center text-gray-500 py-8">
+                    <div id="aiSelectionPanel" class="p-5 min-h-[160px]">
+                        <div class="text-center text-gray-400 py-8">
                             Select a match to see AI analysis
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <button id="analyzeAllBtn" class="primary-action w-full">Analyze All Matches</button>
-
-                <div class="site-panel">
-                    <h2>Select Betting Site</h2>
-                    <input type="text" id="siteSearchInput"
-                        placeholder="Search SportyBet, Bet9ja, 22Bet..."
-                        autocomplete="off"
-                        class="form-control w-full">
-                    <div id="siteGrid" class="site-grid mt-3"></div>
-                    <div id="siteDropdown" class="hidden"></div>
-                    <div id="dropdownItems" class="hidden"></div>
-                    <div id="selectedSiteDisplay" class="selected-site gradient-sporty">
-                        <div class="flex justify-between items-center gap-2">
-                            <span class="font-bold">SportyBet</span>
-                            <span class="text-sm" id="liveStatusText">Ready</span>
+                <section class="dashboard-panel overflow-hidden">
+                    <div class="panel-header compact">
+                        <h2 class="panel-title">Quick Stats</h2>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-value" id="matchesCountDisplay">0</div>
+                            <div class="stat-label">Matches</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value green" id="valueBetsCount">0</div>
+                            <div class="stat-label">Value Bets</div>
                         </div>
                     </div>
-                    <div class="mt-3 text-xs text-gray-500" id="siteInfoText">
-                        SportyBet selected.
-                    </div>
-                </div>
+                </section>
 
-                <div class="dashboard-panel overflow-hidden">
+                <button id="analyzeAllBtn" class="secondary-action w-full">Analyze All Matches</button>
+
+                <section class="dashboard-panel overflow-hidden">
                     <div class="panel-header compact">
                         <div>
                             <h2 class="panel-title">Manual Entry</h2>
@@ -202,8 +141,10 @@
                         </div>
                     </div>
                     <div class="p-5 space-y-3">
-                        <input type="text" id="manualHomeTeam" placeholder="Home Team" class="form-control w-full">
-                        <input type="text" id="manualAwayTeam" placeholder="Away Team" class="form-control w-full">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input type="text" id="manualHomeTeam" placeholder="Home Team" class="form-control">
+                            <input type="text" id="manualAwayTeam" placeholder="Away Team" class="form-control">
+                        </div>
                         <select id="manualMarket" class="form-control w-full">
                             <option value="1X2">1X2 - Match Winner</option>
                             <option value="Over/Under">Over/Under Goals</option>
@@ -213,14 +154,14 @@
                         <input type="text" id="manualOutcome" placeholder="Outcome (e.g., Home, Over 2.5)" class="form-control w-full">
                         <input type="number" id="manualOdds" step="0.01" placeholder="Odds" class="form-control w-full">
                         <button id="manualPredictBtn" class="secondary-action w-full">AI Predict</button>
-                        <div id="manualResult" class="hidden mt-3 p-3 bg-gray-100 rounded text-sm"></div>
+                        <div id="manualResult" class="hidden mt-3 selection-row text-sm"></div>
                     </div>
-                </div>
+                </section>
 
-                <div class="dashboard-panel overflow-hidden">
+                <section class="dashboard-panel overflow-hidden">
                     <div class="panel-header compact">
                         <div>
-                            <h2 class="panel-title">Betslip Screenshot</h2>
+                            <h2 class="panel-title">Betslip Analyzer</h2>
                             <p class="panel-subtitle">Upload a slip or paste selections</p>
                         </div>
                     </div>
@@ -235,7 +176,7 @@
                         <textarea id="slipTextInput" class="form-control w-full min-h-[120px]" placeholder="Paste betslip text if OCR is unavailable or edit detected text here. Example: Arsenal vs Chelsea - Home 1.85"></textarea>
                         <div class="space-y-2">
                             <div class="flex items-center justify-between gap-3">
-                                <div class="text-xs uppercase tracking-wide text-gray-500">Typed odds</div>
+                                <div class="text-xs uppercase tracking-wide text-gray-400">Typed odds</div>
                                 <button type="button" id="addSlipRowBtn" class="mini-action">Add Selection</button>
                             </div>
                             <div id="typedSlipRows" class="space-y-2"></div>
@@ -243,17 +184,11 @@
                         <button id="analyzeSlipBtn" class="secondary-action w-full">Analyze Betslip</button>
                         <div id="slipAnalysisResult" class="hidden mt-3"></div>
                     </div>
-                </div>
+                </section>
             </aside>
         </section>
     </main>
 
-    <button class="chat-float" type="button" aria-label="Chat">≡</button>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-    <script>
-        document.getElementById('refreshMirror')?.addEventListener('click', () => {
-            document.getElementById('refreshBtn')?.click();
-        });
-    </script>
 </body>
 </html>
