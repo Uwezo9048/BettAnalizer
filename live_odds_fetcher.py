@@ -21,7 +21,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-LIVE_FEEDS_ENABLED = os.environ.get("LIVE_FEEDS_ENABLED", "0") == "1"
+_live_feeds_setting = os.environ.get("LIVE_FEEDS_ENABLED", "1").strip().lower()
+LIVE_FEEDS_ENABLED = os.environ.get("RENDER") == "true" or _live_feeds_setting in {"1", "true", "yes", "on"}
 API_IMPORT_ERROR = None
 
 # Supported betting sites with live feed capability
