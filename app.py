@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import sys
+import subprocess
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
@@ -31,89 +32,95 @@ from live_odds_fetcher import (
 ai = get_ai()
 fetcher = get_fetcher()
 
-# ========== FORCE TESSERACT PATH ==========
+# ========== TESSERACT OCR CONFIGURATION ==========
 import pytesseract
-import subprocess
-import os
 
-# OVERRIDE: Force correct path for Render (Linux)
+# STEP 1: Override environment variable for Render
 if os.environ.get('RENDER') == 'true':
-    print("[OCR] 🔍 Running on Render - configuring Tesseract...")
+    print("[OCR] 🔍 Render environment detected")
+    # Force Linux path (override Windows path from environment)
+    os.environ['TESSERACT_CMD'] = '/usr/bin/tesseract'
+    print("[OCR] ✅ TESSERACT_CMD set to: /usr/bin/tesseract")
+
+# STEP 2: Find Tesseract
+def find_tesseract():
+    """Find Tesseract executable across different platforms"""
     
-    # Check if Tesseract exists
-    tesseract_paths = [
-        '/usr/bin/tesseract',
-        '/usr/local/bin/tesseract',
-        '/opt/render/project/src/.venv/bin/tesseract',
-    ]
+    # Check environment variable first
+    env_path = os.environ.get('TESSERACT_CMD')
+    if env_path and os.path.exists(env_path):
+        return env_path
     
-    tesseract_found = False
-    for path in tesseract_paths:
-        if os.path.exists(path):
-            pytesseract.pytesseract.tesseract_cmd = path
-            os.environ['TESSERACT_CMD'] = path
-            print(f"[OCR] ✅ Tesseract found at: {path}")
-            tesseract_found = True
-            break
-    
-    if not tesseract_found:
-        # Try to find via which command
+    # Check if on Render (Linux)
+    if os.environ.get('RENDER') == 'true':
+        linux_paths = [
+            '/usr/bin/tesseract',
+            '/usr/local/bin/tesseract',
+            '/opt/render/project/src/.venv/bin/tesseract',
+        ]
+        for path in linux_paths:
+            if os.path.exists(path):
+                return path
+        
+        # Try which command
         try:
-            import subprocess
             result = subprocess.run(['which', 'tesseract'], capture_output=True, text=True, timeout=5)
             if result.returncode == 0 and result.stdout.strip():
-                path = result.stdout.strip()
-                pytesseract.pytesseract.tesseract_cmd = path
-                os.environ['TESSERACT_CMD'] = path
-                print(f"[OCR] ✅ Tesseract found via which: {path}")
-                tesseract_found = True
+                return result.stdout.strip()
         except:
             pass
-    
-    # Try to find via find command
-    if not tesseract_found:
+        
+        # Try find command
         try:
             result = subprocess.run(['find', '/usr', '-name', 'tesseract', '-type', 'f'], 
                                   capture_output=True, text=True, timeout=10)
             if result.returncode == 0 and result.stdout.strip():
-                path = result.stdout.strip().split('\n')[0]
-                if os.path.exists(path):
-                    pytesseract.pytesseract.tesseract_cmd = path
-                    os.environ['TESSERACT_CMD'] = path
-                    print(f"[OCR] ✅ Tesseract found via find: {path}")
-                    tesseract_found = True
+                return result.stdout.strip().split('\n')[0]
         except:
             pass
+        
+        return None
     
-    if not tesseract_found:
-        print("[OCR] ❌ Tesseract not found on Render!")
-        print("[OCR] 💡 Check if build.sh installed Tesseract correctly")
-else:
-    # Local Windows/Linux/macOS
-    print("[OCR] 🔍 Running locally - configuring Tesseract...")
-    
-    TESSERACT_PATHS = [
+    # Check Windows paths
+    windows_paths = [
         r'C:\Program Files\Tesseract-OCR\tesseract.exe',
         r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+    ]
+    for path in windows_paths:
+        if os.path.exists(path):
+            return path
+    
+    # Check Linux/macOS paths
+    linux_paths = [
         '/usr/bin/tesseract',
         '/usr/local/bin/tesseract',
         '/opt/homebrew/bin/tesseract',
     ]
+    for path in linux_paths:
+        if os.path.exists(path):
+            return path
     
-    env_path = os.environ.get('TESSERACT_CMD')
-    if env_path and os.path.exists(env_path):
-        pytesseract.pytesseract.tesseract_cmd = env_path
-        print(f"[OCR] ✅ Tesseract found at: {env_path}")
+    return None
+
+# STEP 3: Set Tesseract path
+tesseract_path = find_tesseract()
+if tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+    os.environ['TESSERACT_CMD'] = tesseract_path
+    print(f"[OCR] ✅ Tesseract found at: {tesseract_path}")
+else:
+    print("[OCR] ❌ Tesseract not found!")
+    if os.environ.get('RENDER') == 'true':
+        print("[OCR] 💡 On Render, make sure build.sh installs tesseract-ocr")
     else:
-        for path in TESSERACT_PATHS:
-            if os.path.exists(path):
-                pytesseract.pytesseract.tesseract_cmd = path
-                os.environ['TESSERACT_CMD'] = path
-                print(f"[OCR] ✅ Tesseract found at: {path}")
-                break
-        else:
-            print("[OCR] ⚠️ Tesseract not found. OCR will not work.")
-            print("[OCR] 💡 Install Tesseract from: https://github.com/UB-Mannheim/tesseract/wiki")
+        print("[OCR] 💡 Install Tesseract from: https://github.com/UB-Mannheim/tesseract/wiki")
+
+# STEP 4: Test Tesseract
+try:
+    version = pytesseract.get_tesseract_version()
+    print(f"[OCR] ✅ Tesseract version: {version}")
+except Exception as e:
+    print(f"[OCR] ⚠️ Could not get Tesseract version: {e}")
 
 # ========== Routes ==========
 
@@ -354,37 +361,26 @@ def custom_predict():
 
 def _get_tesseract_command():
     """Get tesseract command path - cross-platform"""
-    # First check if on Render
+    # Return the path we already found
+    tesseract_path = os.environ.get('TESSERACT_CMD')
+    if tesseract_path and os.path.exists(tesseract_path):
+        return tesseract_path
+    
+    # Check if on Render
     if os.environ.get('RENDER') == 'true':
-        # Force Linux path on Render
         linux_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract']
         for path in linux_paths:
             if os.path.exists(path):
                 return path
-        # If not found, try to find it
-        try:
-            import subprocess
-            result = subprocess.run(['which', 'tesseract'], capture_output=True, text=True)
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except:
-            pass
         return None
-    
-    # First check environment variable
-    env_cmd = os.environ.get('TESSERACT_CMD')
-    if env_cmd and os.path.exists(env_cmd):
-        return env_cmd
     
     # Check common Windows paths
     windows_paths = [
         r'C:\Program Files\Tesseract-OCR\tesseract.exe',
         r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
     ]
-    
     for path in windows_paths:
         if os.path.exists(path):
-            print(f"[OCR] Found Tesseract at: {path}")
             return path
     
     # Linux/macOS paths
@@ -393,19 +389,9 @@ def _get_tesseract_command():
         '/usr/local/bin/tesseract',
         '/opt/homebrew/bin/tesseract',
     ]
-    
     for path in linux_paths:
         if os.path.exists(path):
             return path
-    
-    # Try to find via which command
-    try:
-        import shutil
-        which_path = shutil.which('tesseract')
-        if which_path:
-            return which_path
-    except:
-        pass
     
     return None
 
@@ -440,30 +426,64 @@ def _ocr_available():
         print(f"[OCR] Error checking availability: {e}")
         return False
 
+def _extract_text_fallback(image):
+    """Fallback OCR using alternative methods when Tesseract is not available"""
+    try:
+        from PIL import Image
+        
+        # Try to extract text using pytesseract if available
+        try:
+            import pytesseract
+            tesseract_cmd = _get_tesseract_command()
+            if tesseract_cmd:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+                text = pytesseract.image_to_string(image)
+                if text.strip():
+                    return text.strip()
+        except:
+            pass
+        
+        # If no text found, try to read EXIF data or metadata
+        try:
+            if hasattr(image, 'info') and image.info:
+                for key, value in image.info.items():
+                    if isinstance(value, str) and len(value) > 10:
+                        import re
+                        if re.search(r'\d+\.\d{2}', value):
+                            return value
+        except:
+            pass
+        
+        return ''
+            
+    except Exception as e:
+        print(f"[OCR Fallback] Error: {e}")
+        return ''
+
 def _extract_text_from_image(uploaded_file):
     """Extract text from uploaded image using OCR with enhanced preprocessing"""
     if not uploaded_file:
         return ''
     
     try:
-        # Check if OCR is available
-        if not _ocr_available():
-            print("[OCR] Tesseract not available.")
-            return ''
-        
         from io import BytesIO
-        import pytesseract
         from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-        
-        # Set tesseract command
-        tesseract_cmd = _get_tesseract_command()
-        if tesseract_cmd:
-            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-            print(f"[OCR] Using Tesseract at: {tesseract_cmd}")
         
         # Read image
         image = Image.open(BytesIO(uploaded_file.read()))
         print(f"[OCR] Original image size: {image.size}, mode: {image.mode}")
+        
+        # Check if OCR is available
+        if not _ocr_available():
+            print("[OCR] Tesseract not available. Using fallback method...")
+            return _extract_text_fallback(image)
+        
+        # Set tesseract command
+        tesseract_cmd = _get_tesseract_command()
+        if tesseract_cmd:
+            import pytesseract
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            print(f"[OCR] Using Tesseract at: {tesseract_cmd}")
         
         # ========== Enhanced Preprocessing ==========
         
@@ -482,38 +502,32 @@ def _extract_text_from_image(uploaded_file):
         
         # 3. Enhance contrast
         enhancer = ImageEnhance.Contrast(image)
-        image = enhancer.enhance(2.5)
+        image = enhancer.enhance(3.0)
         print(f"[OCR] Enhanced contrast")
         
         # 4. Apply sharpening
         image = image.filter(ImageFilter.SHARPEN)
         print(f"[OCR] Applied sharpening")
         
-        # 5. Apply slight blur to reduce noise
-        image = image.filter(ImageFilter.GaussianBlur(radius=0.5))
-        print(f"[OCR] Applied slight blur to reduce noise")
+        # 5. Remove noise
+        image = image.filter(ImageFilter.MedianFilter(size=3))
+        print(f"[OCR] Removed noise")
         
-        # 6. Auto contrast / equalize histogram
-        try:
-            image = ImageOps.equalize(image)
-            print(f"[OCR] Equalized histogram")
-        except:
-            pass
-        
-        # 7. Binarize (convert to black and white) - helps with text clarity
-        threshold = 128
-        image = image.point(lambda p: p > threshold and 255)
+        # 6. Binarize
+        threshold = 120
+        image = image.point(lambda p: 255 if p > threshold else 0)
         print(f"[OCR] Binarized with threshold: {threshold}")
         
         # ========== Try Multiple OCR Configs ==========
         
+        import pytesseract
+        
         configs = [
-            '--psm 6 --oem 3',      # Block of text, default OCR
-            '--psm 4 --oem 3',      # Single column of text
-            '--psm 11 --oem 3',     # Sparse text
-            '--psm 12 --oem 3',     # Sparse text with OSD
-            '--psm 3 --oem 3',      # Fully automatic page segmentation
-            '-l eng --psm 6 --oem 3', # English language
+            '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@- ',
+            '--psm 4 --oem 3',
+            '--psm 11 --oem 3',
+            '--psm 3 --oem 3',
+            '-l eng --psm 6 --oem 3',
         ]
         
         best_text = ''
@@ -534,17 +548,18 @@ def _extract_text_from_image(uploaded_file):
                 print(f"[OCR] Config {config} failed: {e}")
                 continue
         
-        # If no text found with any config, try a more aggressive approach
+        # If no text found, try with original image (no preprocessing)
         if not best_text:
-            print("[OCR] No text found with standard configs. Trying with white background...")
+            print("[OCR] No text found with preprocessed image. Trying original...")
             try:
-                inverted = ImageOps.invert(image)
-                text = pytesseract.image_to_string(inverted, config='--psm 6 --oem 3')
+                uploaded_file.seek(0)
+                original = Image.open(BytesIO(uploaded_file.read()))
+                text = pytesseract.image_to_string(original, config='--psm 6 --oem 3')
                 if text.strip():
                     best_text = text.strip()
-                    print(f"[OCR] Found text with inverted image: {len(best_text)} characters")
+                    print(f"[OCR] Found text with original image: {len(best_text)} characters")
             except Exception as e:
-                print(f"[OCR] Invert attempt failed: {e}")
+                print(f"[OCR] Original image attempt failed: {e}")
         
         if best_text:
             print(f"[OCR] Total extracted text: {len(best_text)} characters")
@@ -587,9 +602,13 @@ def analyze_betslip():
             # Build helpful error message
             error_msg = 'No readable betslip text found. '
             if uploaded_file and not ocr_text:
-                error_msg += 'OCR could not extract text from the image. '
-                error_msg += 'Please paste the betslip text manually using the "Text Input" tab, '
-                error_msg += 'or upload a clearer image with better lighting and contrast.'
+                if not ocr_available:
+                    error_msg += 'OCR is not available on this server. '
+                    error_msg += 'Please paste the betslip text manually using the "Text Input" tab.'
+                else:
+                    error_msg += 'OCR could not extract text from the image. '
+                    error_msg += 'Please paste the betslip text manually using the "Text Input" tab, '
+                    error_msg += 'or upload a clearer image with better lighting and contrast.'
             elif not uploaded_file and not user_text:
                 error_msg += 'Please paste your betslip text in the "Text Input" tab '
                 error_msg += 'using the format: "Team A vs Team B - Selection @ odds"'
