@@ -1,6 +1,7 @@
 /**
  * BetAnalyzer - Main Application
  * Handles UI interactions, API calls, and real-time updates
+ * Version: 2.0 - Complete with betslip analyzer, OCR support, and live/upcoming filters
  */
 
 // ============================================
@@ -16,7 +17,8 @@ const AppState = {
     isLoading: false,
     autoRefresh: false,
     refreshInterval: null,
-    selectedMatch: null
+    selectedMatch: null,
+    showFinished: false
 };
 
 // ============================================
@@ -33,6 +35,7 @@ const DOM = {
     refreshBtn: document.getElementById('refresh-btn'),
     analyzeAllBtn: document.getElementById('analyze-all-btn'),
     autoRefreshToggle: document.getElementById('auto-refresh-toggle'),
+    filterToggle: document.getElementById('filter-toggle'),
     
     // Containers
     matchesContainer: document.getElementById('matches-container'),
@@ -64,6 +67,13 @@ const DOM = {
     slipAnalyzeBtn: document.getElementById('slip-analyze-btn'),
     slipClearBtn: document.getElementById('slip-clear-btn'),
     slipResults: document.getElementById('slip-results'),
+    slipImageInput: document.getElementById('slip-image-input'),
+    slipImageAnalyzeBtn: document.getElementById('slip-image-analyze-btn'),
+    slipImageRemoveBtn: document.getElementById('slip-image-remove-btn'),
+    dropZone: document.getElementById('drop-zone'),
+    imagePreview: document.getElementById('image-preview'),
+    imageFilename: document.getElementById('image-filename'),
+    previewContainer: document.getElementById('image-preview-container'),
     
     // Toast
     toast: document.getElementById('toast'),
@@ -116,7 +126,18 @@ function setLoading(isLoading) {
 // Filter Functions
 // ============================================
 
+function filterMatches(matches) {
+    if (!matches || matches.length === 0) return [];
+    
+    // Only keep Live and Upcoming matches (exclude Finished)
+    return matches.filter(match => {
+        const status = (match.status || 'Upcoming').toLowerCase();
+        return status === 'live' || status === 'upcoming' || status === 'not_started';
+    });
+}
+
 function getMatchStatus(match) {
+    // Determine status if not set
     if (!match.status) {
         if (match.start_time) {
             try {
@@ -281,14 +302,14 @@ async function analyzeSlip(text) {
         });
         
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Slip analysis failed');
+            const errorData = await response.json().catch(() => ({ error: 'Analysis failed' }));
+            throw new Error(errorData.error || 'Slip analysis failed');
         }
         
         return await response.json();
     } catch (error) {
         showToast(error.message, 'error', 'Slip Analysis Error');
-        return null;
+        throw error;
     }
 }
 
@@ -300,6 +321,7 @@ function renderMatches(matches) {
     const container = DOM.matchesContainer;
     if (!container) return;
     
+    // Filter out finished matches
     const filteredMatches = matches ? matches.filter(m => !isFinished(m)) : [];
     const liveMatches = filteredMatches.filter(m => getMatchStatus(m).toLowerCase() === 'live');
     const upcomingMatches = filteredMatches.filter(m => getMatchStatus(m).toLowerCase() === 'upcoming');
@@ -318,10 +340,12 @@ function renderMatches(matches) {
         return;
     }
     
+    // Sort: Live matches first, then upcoming
     const sortedMatches = [...liveMatches, ...upcomingMatches];
     
     let html = '';
     
+    // Live matches section
     if (liveMatches.length > 0) {
         html += `
             <div style="margin: 16px 0 8px 0; display: flex; align-items: center; gap: 10px;">
@@ -337,6 +361,7 @@ function renderMatches(matches) {
         html += `</div>`;
     }
     
+    // Upcoming matches section
     if (upcomingMatches.length > 0) {
         html += `
             <div style="margin: 24px 0 8px 0; display: flex; align-items: center; gap: 10px;">
@@ -354,6 +379,7 @@ function renderMatches(matches) {
     
     container.innerHTML = html;
     
+    // Attach event listeners to analyze buttons
     container.querySelectorAll('.analyze-match-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
             const matchId = parseInt(btn.dataset.matchId);
@@ -364,6 +390,7 @@ function renderMatches(matches) {
         });
     });
     
+    // Update stats
     renderStats(filteredMatches, liveMatches, upcomingMatches);
 }
 
@@ -374,6 +401,7 @@ function renderMatchCard(match) {
     const compClass = competitionType.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const startTime = match.start_time ? formatDate(match.start_time) : 'Date TBD';
     
+    // Build markets HTML
     let marketsHtml = '';
     if (match.markets) {
         for (const [marketName, outcomes] of Object.entries(match.markets)) {
@@ -434,16 +462,23 @@ function renderMatchCard(match) {
 }
 
 function renderStats(matches, liveMatches, upcomingMatches) {
+    const countEl = DOM.matchCount;
+    const valueEl = DOM.valueBetCount;
+    const liveEl = DOM.liveCount;
+    const upcomingEl = DOM.upcomingCount;
+    const valueBadge = DOM.valueBadge;
+    const matchBadge = DOM.matchBadge;
+    
     const total = matches?.length || 0;
     const live = liveMatches?.length || 0;
     const upcoming = upcomingMatches?.length || 0;
     
-    if (DOM.matchCount) DOM.matchCount.textContent = total;
-    if (DOM.valueBetCount) DOM.valueBetCount.textContent = total;
-    if (DOM.liveCount) DOM.liveCount.textContent = live;
-    if (DOM.upcomingCount) DOM.upcomingCount.textContent = upcoming;
-    if (DOM.valueBadge) DOM.valueBadge.textContent = total;
-    if (DOM.matchBadge) DOM.matchBadge.textContent = `${total} matches (${live} live)`;
+    if (countEl) countEl.textContent = total;
+    if (valueEl) valueEl.textContent = total;
+    if (liveEl) liveEl.textContent = live;
+    if (upcomingEl) upcomingEl.textContent = upcoming;
+    if (valueBadge) valueBadge.textContent = total;
+    if (matchBadge) matchBadge.textContent = `${total} matches (${live} live)`;
 }
 
 function renderAISelection(analysis) {
@@ -535,7 +570,7 @@ function renderAnalysisResults(analysis) {
 }
 
 // ============================================
-// Betslip Results Display - Detailed
+// Betslip Display Functions
 // ============================================
 
 function displaySlipResults(result) {
@@ -808,7 +843,8 @@ async function handleAnalyzeAll() {
         const results = await analyzeAllMatches(activeMatches, siteName);
         
         if (results) {
-            if (DOM.valueBetCount) DOM.valueBetCount.textContent = results.total_value_bets || 0;
+            const valueEl = DOM.valueBetCount;
+            if (valueEl) valueEl.textContent = results.total_value_bets || 0;
             
             showToast(`Found ${results.total_value_bets} value bets!`, 'success', 'Analysis Complete');
             
@@ -893,8 +929,13 @@ async function handleCustomPredict() {
     }
 }
 
-async function handleSlipAnalysis() {
-    const text = DOM.slipInput?.value?.trim();
+// ============================================
+// Betslip Handlers
+// ============================================
+
+// Slip text analysis
+document.getElementById('slip-analyze-btn')?.addEventListener('click', async () => {
+    const text = document.getElementById('slip-input')?.value?.trim();
     if (!text) {
         showToast('Please paste your betslip text', 'error', 'Missing Input');
         return;
@@ -912,16 +953,151 @@ async function handleSlipAnalysis() {
     } finally {
         setLoading(false);
     }
+});
+
+// Clear text
+document.getElementById('slip-clear-btn')?.addEventListener('click', () => {
+    document.getElementById('slip-input').value = '';
+    document.getElementById('slip-results').classList.remove('visible');
+    document.getElementById('slip-results').innerHTML = '';
+    showToast('Cleared', 'info', 'Betslip');
+});
+
+// ============================================
+// Betslip Image Upload & OCR
+// ============================================
+
+// Tab switching
+document.querySelectorAll('.slip-tab').forEach(tab => {
+    tab.addEventListener('click', function() {
+        document.querySelectorAll('.slip-tab').forEach(t => {
+            t.classList.remove('active');
+            t.classList.remove('btn-primary');
+            t.classList.add('btn-secondary');
+        });
+        this.classList.add('active');
+        this.classList.remove('btn-secondary');
+        this.classList.add('btn-primary');
+        
+        const tabName = this.dataset.tab;
+        document.querySelectorAll('.slip-tab-content').forEach(content => {
+            content.style.display = 'none';
+        });
+        const target = document.getElementById(`slip-${tabName}-tab`);
+        if (target) target.style.display = 'block';
+    });
+});
+
+// Drop zone functionality
+let uploadedFile = null;
+
+const dropZone = document.getElementById('drop-zone');
+const imageInput = document.getElementById('slip-image-input');
+const previewContainer = document.getElementById('image-preview-container');
+const imagePreview = document.getElementById('image-preview');
+const imageFilename = document.getElementById('image-filename');
+
+if (dropZone) {
+    dropZone.addEventListener('click', () => {
+        if (imageInput) imageInput.click();
+    });
+    
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = '#7b2ffc';
+        dropZone.style.background = '#141b2b';
+    });
+    
+    dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = '#2a3a5a';
+        dropZone.style.background = '#0a0e17';
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = '#2a3a5a';
+        dropZone.style.background = '#0a0e17';
+        
+        if (e.dataTransfer.files.length > 0) {
+            handleFile(e.dataTransfer.files[0]);
+        }
+    });
 }
 
-function clearSlip() {
-    if (DOM.slipInput) DOM.slipInput.value = '';
-    if (DOM.slipResults) {
-        DOM.slipResults.innerHTML = '';
-        DOM.slipResults.classList.remove('visible');
-    }
-    showToast('Cleared', 'info', 'Betslip');
+if (imageInput) {
+    imageInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleFile(e.target.files[0]);
+        }
+    });
 }
+
+function handleFile(file) {
+    if (!file.type.startsWith('image/')) {
+        showToast('Please upload an image file', 'error', 'Invalid File');
+        return;
+    }
+    
+    uploadedFile = file;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        if (imagePreview) imagePreview.src = e.target.result;
+        if (imageFilename) imageFilename.textContent = file.name;
+        if (previewContainer) previewContainer.style.display = 'block';
+        if (dropZone) dropZone.style.display = 'none';
+        showToast('Image uploaded successfully!', 'success', 'Upload Complete');
+    };
+    reader.readAsDataURL(file);
+}
+
+// Remove image
+document.getElementById('slip-image-remove-btn')?.addEventListener('click', () => {
+    uploadedFile = null;
+    if (previewContainer) previewContainer.style.display = 'none';
+    if (dropZone) dropZone.style.display = 'block';
+    if (imageInput) imageInput.value = '';
+    document.getElementById('slip-results')?.classList.remove('visible');
+    showToast('Image removed', 'info', 'Upload');
+});
+
+// Analyze image (OCR)
+document.getElementById('slip-image-analyze-btn')?.addEventListener('click', async () => {
+    if (!uploadedFile) {
+        showToast('Please upload an image first', 'error', 'No Image');
+        return;
+    }
+    
+    try {
+        setLoading(true);
+        const formData = new FormData();
+        formData.append('screenshot', uploadedFile);
+        
+        const response = await fetch('/api/analyze-slip', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ error: 'OCR analysis failed' }));
+            throw new Error(error.error || 'OCR analysis failed');
+        }
+        
+        const result = await response.json();
+        displaySlipResults(result);
+        
+        if (result.ocr_text && document.getElementById('slip-input')) {
+            document.getElementById('slip-input').value = result.ocr_text;
+        }
+        
+        showToast('Image analyzed successfully!', 'success', 'OCR Complete');
+    } catch (error) {
+        showToast(error.message || 'OCR analysis failed', 'error', 'OCR Error');
+    } finally {
+        setLoading(false);
+    }
+});
 
 // ============================================
 // Auto-Refresh
@@ -948,37 +1124,12 @@ function toggleAutoRefresh() {
 }
 
 // ============================================
-// Betslip Tab Switching
-// ============================================
-
-function initBetslipTabs() {
-    const tabs = document.querySelectorAll('.slip-tab');
-    if (!tabs.length) return;
-    
-    tabs.forEach(tab => {
-        tab.addEventListener('click', function() {
-            tabs.forEach(t => {
-                t.classList.remove('active', 'btn-primary');
-                t.classList.add('btn-secondary');
-            });
-            this.classList.add('active', 'btn-primary');
-            this.classList.remove('btn-secondary');
-            
-            const tabName = this.dataset.tab;
-            document.querySelectorAll('.slip-tab-content').forEach(content => {
-                content.style.display = 'none';
-            });
-            const target = document.getElementById(`slip-${tabName}-tab`);
-            if (target) target.style.display = 'block';
-        });
-    });
-}
-
-// ============================================
 // Initialization
 // ============================================
 
 async function init() {
+    console.log('🚀 BetAnalyzer initializing...');
+    
     // Load sites
     const sites = await fetchSites();
     if (DOM.siteSelect) {
@@ -1007,18 +1158,13 @@ async function init() {
     }
     
     // Set up event listeners
-    DOM.siteSelect?.addEventListener('change', handleSiteChange);
-    DOM.sportSelect?.addEventListener('change', handleSportChange);
-    DOM.leagueSelect?.addEventListener('change', handleLeagueChange);
-    DOM.refreshBtn?.addEventListener('click', handleRefresh);
-    DOM.analyzeAllBtn?.addEventListener('click', handleAnalyzeAll);
-    DOM.autoRefreshToggle?.addEventListener('click', toggleAutoRefresh);
-    DOM.manualPredictBtn?.addEventListener('click', handleCustomPredict);
-    DOM.slipAnalyzeBtn?.addEventListener('click', handleSlipAnalysis);
-    DOM.slipClearBtn?.addEventListener('click', clearSlip);
-    
-    // Initialize betslip tabs
-    initBetslipTabs();
+    if (DOM.siteSelect) DOM.siteSelect.addEventListener('change', handleSiteChange);
+    if (DOM.sportSelect) DOM.sportSelect.addEventListener('change', handleSportChange);
+    if (DOM.leagueSelect) DOM.leagueSelect.addEventListener('change', handleLeagueChange);
+    if (DOM.refreshBtn) DOM.refreshBtn.addEventListener('click', handleRefresh);
+    if (DOM.analyzeAllBtn) DOM.analyzeAllBtn.addEventListener('click', handleAnalyzeAll);
+    if (DOM.autoRefreshToggle) DOM.autoRefreshToggle.addEventListener('click', toggleAutoRefresh);
+    if (DOM.manualPredictBtn) DOM.manualPredictBtn.addEventListener('click', handleCustomPredict);
     
     // Load initial matches
     await handleRefresh();
@@ -1031,8 +1177,12 @@ async function init() {
         DOM.statusDot.className = 'status-dot live';
     }
     
-    console.log('🚀 BetAnalyzer initialized!');
+    console.log('✅ BetAnalyzer initialized successfully!');
 }
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', init);
+
+// Expose functions globally for inline event handlers
+window.handleRefresh = handleRefresh;
+window.handleMatchAnalysis = handleMatchAnalysis;
