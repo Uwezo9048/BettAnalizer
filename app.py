@@ -102,7 +102,7 @@ def get_matches():
         first_match = matches[0] if matches else {}
         is_sample_data = bool(first_match.get('sample', False))
         is_stored_data = bool(first_match.get('from_storage', False))
-        is_live_data = bool(matches) and LIVE_FEEDS_ENABLED and API_AVAILABLE and not is_sample_data and not is_stored_data
+        is_live_data = bool(matches) and LIVE_FEEDS_ENABLED and not is_sample_data and not is_stored_data
         data_source = 'live' if is_live_data else 'stored' if is_stored_data else 'sample' if is_sample_data else 'empty'
         
         return jsonify({
@@ -283,7 +283,8 @@ def api_status():
         'oddsafrica_api_error': API_IMPORT_ERROR,
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
         'supported_sites': list(SUPPORTED_LIVE_SITES.keys()),
-        'live_feeds_active': API_AVAILABLE and LIVE_FEEDS_ENABLED,
+        'live_feeds_active': LIVE_FEEDS_ENABLED,
+        'data_source': 'direct_sportybet_api_with_sample_fallback',
         'timestamp': datetime.now().isoformat()
     })
 
@@ -292,93 +293,18 @@ def debug_status():
     """Debug endpoint to check what's happening on Render"""
     import sys
     
-    # Check if OddsAfrica-API is installed
-    api_installed = False
-    api_path = None
-    api_error = None
-    try:
-        import engine.bookie_models.sportybet_model
-        api_installed = True
-        api_path = engine.bookie_models.sportybet_model.__file__
-    except ImportError as e:
-        api_error = str(e)
-    
-    # Check environment
-    env_vars = {
-        'RENDER': os.environ.get('RENDER'),
-        'LIVE_FEEDS_ENABLED': os.environ.get('LIVE_FEEDS_ENABLED'),
-        'PYTHONPATH': os.environ.get('PYTHONPATH'),
-        'PATH': os.environ.get('PATH')[:200] + '...' if os.environ.get('PATH') else None
-    }
-    
     return jsonify({
         'api_available': API_AVAILABLE,
         'api_import_error': API_IMPORT_ERROR,
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
-        'api_installed': api_installed,
-        'api_path': api_path,
-        'api_error': api_error,
-        'environment': env_vars,
+        'environment': {
+            'RENDER': os.environ.get('RENDER'),
+            'LIVE_FEEDS_ENABLED': os.environ.get('LIVE_FEEDS_ENABLED'),
+        },
         'python_version': sys.version,
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'note': 'Using direct SportyBet API with sample data fallback'
     })
-
-@app.route('/api/test-sportybet')
-def test_sportybet():
-    """Test SportyBet API directly"""
-    try:
-        import requests
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Clientid": "web",
-            "Platform": "web",
-            "Operid": "1",
-        }
-        
-        # Test the API endpoint
-        response = requests.get(
-            "https://www.sportybet.com/api/ke/factsCenter/liveOrPrematchEvents",
-            headers=headers,
-            params={"sportId": "sr:sport:1", "productId": 3},
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            # Check if we got real data
-            has_real_matches = False
-            sample_count = 0
-            tournament_names = []
-            
-            for tournament in data.get("data", []):
-                tournament_name = tournament.get("name", "")
-                tournament_names.append(tournament_name)
-                if "SRL" in tournament_name or "simulated" in tournament_name.lower():
-                    sample_count += len(tournament.get("events", []))
-                else:
-                    has_real_matches = True
-            
-            return jsonify({
-                'status': 'success',
-                'has_real_matches': has_real_matches,
-                'sample_matches_count': sample_count,
-                'total_tournaments': len(data.get("data", [])),
-                'tournament_names': tournament_names[:10],
-                'full_response_size': len(str(data))
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'status_code': response.status_code,
-                'message': response.text[:200]
-            }), 500
-            
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'error': str(e)
-        }), 500
 
 @app.route('/health')
 def health():
@@ -395,29 +321,10 @@ def health():
 def _ocr_available():
     try:
         import pytesseract
-        from PIL import Image  # noqa: F401
-        command_path = _get_tesseract_command()
-        if command_path:
-            pytesseract.pytesseract.tesseract_cmd = command_path
-        pytesseract.get_tesseract_version()
+        from PIL import Image
         return True
     except Exception:
         return False
-
-def _get_tesseract_command():
-    command_path = os.environ.get('TESSERACT_CMD') or shutil.which('tesseract')
-    if command_path and os.path.exists(command_path):
-        return command_path
-
-    common_paths = [
-        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
-        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe'
-    ]
-    for path in common_paths:
-        if os.path.exists(path):
-            return path
-
-    return None
 
 def _extract_text_from_image(uploaded_file):
     if not uploaded_file or not _ocr_available():
@@ -427,11 +334,6 @@ def _extract_text_from_image(uploaded_file):
         from io import BytesIO
         import pytesseract
         from PIL import Image
-
-        command_path = _get_tesseract_command()
-        if command_path:
-            pytesseract.pytesseract.tesseract_cmd = command_path
-
         image = Image.open(BytesIO(uploaded_file.read()))
         return pytesseract.image_to_string(image).strip()
     except Exception as e:
@@ -480,15 +382,7 @@ def _split_selection_label(label):
     cleaned = re.sub(r'\s+', ' ', label).strip()
     market = 'Betslip Selection'
 
-    known_markets = [
-        '1X2',
-        'Match Winner',
-        'Double Chance',
-        'Over/Under',
-        'Both Teams To Score',
-        'GG/NG',
-        'Handicap'
-    ]
+    known_markets = ['1X2', 'Match Winner', 'Double Chance', 'Over/Under', 'Both Teams To Score', 'GG/NG', 'Handicap']
     for known_market in known_markets:
         if known_market.lower() in cleaned.lower():
             market = known_market
@@ -543,7 +437,6 @@ def _analyze_slip_selection(selection):
 def _combined_odds(selections):
     if not selections:
         return 0
-
     combined = 1
     for selection in selections:
         combined *= selection['odds']
@@ -552,10 +445,8 @@ def _combined_odds(selections):
 def _build_betslip_summary(total, kept, removed, original_odds, suggested_odds):
     if not kept:
         return 'All detected selections look too risky. Rebuild the slip with lower-risk markets or fewer legs.'
-
     if removed:
         return f'Removed {len(removed)} risky selection(s) from {total}. Suggested odds moved from {original_odds} to {suggested_odds} with a cleaner risk profile.'
-
     return f'No removals needed from {total} detected selection(s). Suggested combined odds remain {suggested_odds}.'
 
 if __name__ == '__main__':
