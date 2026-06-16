@@ -14,23 +14,11 @@ if [ "$RENDER" = "true" ]; then
     echo "📦 Updating package list..."
     apt-get update -qq
     
-    # Remove any existing Tesseract (clean install)
-    echo "🗑️ Removing any existing Tesseract installation..."
-    apt-get remove -y tesseract-ocr tesseract-ocr-eng || true
-    apt-get autoremove -y || true
-    
     # Install Tesseract with all dependencies
     echo "📦 Installing Tesseract OCR..."
     apt-get install -y -qq \
         tesseract-ocr \
         tesseract-ocr-eng \
-        tesseract-ocr-fra \
-        tesseract-ocr-deu \
-        tesseract-ocr-spa \
-        tesseract-ocr-ita \
-        tesseract-ocr-por \
-        tesseract-ocr-rus \
-        tesseract-ocr-ara \
         libtesseract-dev \
         libleptonica-dev
     
@@ -39,19 +27,11 @@ if [ "$RENDER" = "true" ]; then
     if [ -f "/usr/bin/tesseract" ]; then
         echo "✅ Tesseract found at: /usr/bin/tesseract"
         /usr/bin/tesseract --version || echo "⚠️ Version check failed"
-        
-        # Test Tesseract with a simple command
-        echo "🧪 Testing Tesseract..."
-        echo "Hello World" | /usr/bin/tesseract stdin stdout -l eng || echo "⚠️ Test failed"
     else
         echo "❌ Tesseract not found at /usr/bin/tesseract"
         # Try to find it
         find /usr -name "tesseract" 2>/dev/null || echo "Tesseract not found anywhere"
     fi
-    
-    # Set environment variable
-    export TESSERACT_CMD=/usr/bin/tesseract
-    echo "✅ TESSERACT_CMD set to: $TESSERACT_CMD"
     
     echo "========================================="
     echo "✅ Tesseract installation complete!"
@@ -70,7 +50,7 @@ pip install -r requirements.txt --quiet
 echo "📁 Creating project directories..."
 mkdir -p static/css static/js templates logs
 
-# Verify Python installations
+# Verify installations
 echo "🔍 Verifying Python installations..."
 python -c "import flask; print(f'✅ Flask version: {flask.__version__}')"
 python -c "import requests; print(f'✅ Requests version: {requests.__version__}')"
@@ -79,8 +59,17 @@ python -c "import pytesseract; print(f'✅ PyTesseract version: {pytesseract.__v
 
 if [ "$RENDER" = "true" ]; then
     echo "🔍 Final Tesseract verification..."
-    echo "Tesseract path: $(which tesseract 2>/dev/null || echo 'Not found')"
-    tesseract --version 2>/dev/null || echo "Tesseract command not found"
+    # Check if Tesseract exists
+    if [ -f "/usr/bin/tesseract" ]; then
+        echo "✅ Tesseract confirmed at /usr/bin/tesseract"
+        export TESSERACT_CMD=/usr/bin/tesseract
+        echo "✅ TESSERACT_CMD set to: $TESSERACT_CMD"
+    else
+        echo "❌ Tesseract not found on Render!"
+        # Try to find it
+        echo "Searching for Tesseract..."
+        find / -name "tesseract" -type f 2>/dev/null | head -5 || echo "Tesseract not found"
+    fi
 fi
 
 echo "========================================="

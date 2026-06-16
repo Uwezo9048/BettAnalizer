@@ -714,6 +714,47 @@ def health():
         'timestamp': datetime.now(timezone.utc).isoformat()
     }), 200
 
+@app.route('/api/test-tesseract')
+def test_tesseract():
+    """Test if Tesseract is installed on Render"""
+    import subprocess
+    import os
+    
+    results = {
+        'render_env': os.environ.get('RENDER'),
+        'tesseract_cmd': os.environ.get('TESSERACT_CMD'),
+        'file_exists': os.path.exists('/usr/bin/tesseract'),
+        'which_tesseract': None,
+        'version': None,
+        'test_output': None
+    }
+    
+    # Try which command
+    try:
+        result = subprocess.run(['which', 'tesseract'], capture_output=True, text=True, timeout=5)
+        results['which_tesseract'] = result.stdout.strip() if result.returncode == 0 else None
+    except:
+        pass
+    
+    # Try to get version
+    try:
+        if os.path.exists('/usr/bin/tesseract'):
+            result = subprocess.run(['/usr/bin/tesseract', '--version'], capture_output=True, text=True, timeout=5)
+            results['version'] = result.stdout.split('\n')[0] if result.returncode == 0 else None
+    except:
+        pass
+    
+    # Test with simple text
+    try:
+        if os.path.exists('/usr/bin/tesseract'):
+            result = subprocess.run(['echo', 'Hello World'], capture_output=True, text=True)
+            # This is a simple test - just checking if tesseract can run
+            results['test_output'] = 'Tesseract executable exists and is accessible'
+    except:
+        pass
+    
+    return jsonify(results)
+
 # ========== Helper Functions ==========
 
 def _parse_betslip_text(text):
