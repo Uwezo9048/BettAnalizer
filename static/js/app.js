@@ -16,7 +16,8 @@ const AppState = {
     isLoading: false,
     autoRefresh: false,
     refreshInterval: null,
-    selectedMatch: null
+    selectedMatch: null,
+    showFinished: false // New: filter for finished matches
 };
 
 // ============================================
@@ -33,6 +34,7 @@ const DOM = {
     refreshBtn: document.getElementById('refresh-btn'),
     analyzeAllBtn: document.getElementById('analyze-all-btn'),
     autoRefreshToggle: document.getElementById('auto-refresh-toggle'),
+    filterToggle: document.getElementById('filter-toggle'),
     
     // Containers
     matchesContainer: document.getElementById('matches-container'),
@@ -45,6 +47,10 @@ const DOM = {
     statusDot: document.getElementById('status-dot'),
     matchCount: document.getElementById('match-count'),
     valueBetCount: document.getElementById('value-bet-count'),
+    liveCount: document.getElementById('live-count'),
+    upcomingCount: document.getElementById('upcoming-count'),
+    valueBadge: document.getElementById('value-badge'),
+    matchBadge: document.getElementById('match-badge'),
     
     // Manual Entry
     manualHome: document.getElementById('manual-home'),
@@ -105,6 +111,51 @@ function setLoading(isLoading) {
         DOM.refreshBtn.disabled = isLoading;
         DOM.refreshBtn.textContent = isLoading ? '⏳ Loading...' : '🔄 Refresh Odds';
     }
+}
+
+// ============================================
+// Filter Functions
+// ============================================
+
+function filterMatches(matches) {
+    if (!matches || matches.length === 0) return [];
+    
+    // Only keep Live and Upcoming matches (exclude Finished)
+    return matches.filter(match => {
+        const status = (match.status || 'Upcoming').toLowerCase();
+        return status === 'live' || status === 'upcoming' || status === 'not_started';
+    });
+}
+
+function getMatchStatus(match) {
+    // Determine status if not set
+    if (!match.status) {
+        if (match.start_time) {
+            try {
+                const start = new Date(match.start_time);
+                const now = new Date();
+                const diff = start - now;
+                if (diff < 0 && diff > -7200000) { // Within last 2 hours
+                    return 'Live';
+                } else if (diff < 0) {
+                    return 'Finished';
+                } else if (diff < 3600000) { // Within next hour
+                    return 'Live';
+                } else {
+                    return 'Upcoming';
+                }
+            } catch {
+                return 'Upcoming';
+            }
+        }
+        return 'Upcoming';
+    }
+    return match.status;
+}
+
+function isFinished(match) {
+    const status = getMatchStatus(match);
+    return status.toLowerCase() === 'finished';
 }
 
 // ============================================
@@ -173,6 +224,7 @@ async function fetchMatches(site, sport, league = null) {
             })
         });
         
+        // Store all matches, but filter for display
         AppState.matches = data.matches || [];
         return data;
     } catch (error) {
@@ -260,87 +312,62 @@ function renderMatches(matches) {
     const container = DOM.matchesContainer;
     if (!container) return;
     
-    if (!matches || matches.length === 0) {
+    // Filter out finished matches
+    const filteredMatches = matches ? matches.filter(m => !isFinished(m)) : [];
+    const liveMatches = filteredMatches.filter(m => getMatchStatus(m).toLowerCase() === 'live');
+    const upcomingMatches = filteredMatches.filter(m => getMatchStatus(m).toLowerCase() === 'upcoming');
+    
+    if (filteredMatches.length === 0) {
         container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📭</div>
-                <div class="empty-title">No Matches Found</div>
-                <div class="empty-desc">No matches available for this selection. Try a different sport or site.</div>
+            <div class="empty-state" style="text-align: center; padding: 60px 20px; color: #6a8aaa;">
+                <div style="font-size: 48px; margin-bottom: 16px;">🎯</div>
+                <div style="font-size: 20px; font-weight: 600; color: #e8edf5;">No Live or Upcoming Matches</div>
+                <div style="margin-top: 8px;">All matches are finished or no matches are scheduled.</div>
+                <div style="margin-top: 16px;">
+                    <button class="btn btn-primary" onclick="handleRefresh()">🔄 Refresh Odds</button>
+                </div>
             </div>
         `;
         return;
     }
     
-    let html = '<div class="matches-grid">';
+    // Sort: Live matches first, then upcoming
+    const sortedMatches = [...liveMatches, ...upcomingMatches];
     
-    matches.forEach(match => {
-        const status = match.status || 'Upcoming';
-        const statusClass = status.toLowerCase();
-        const competitionType = match.competition_type || 'Domestic League';
-        const compClass = competitionType.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-        const startTime = match.start_time ? formatDate(match.start_time) : 'Date TBD';
-        
-        // Build markets HTML
-        let marketsHtml = '';
-        if (match.markets) {
-            for (const [marketName, outcomes] of Object.entries(match.markets)) {
-                if (typeof outcomes === 'object' && outcomes !== null) {
-                    const oddsHtml = Object.entries(outcomes)
-                        .filter(([_, value]) => value > 0)
-                        .map(([label, value]) => `
-                            <div class="odd-item">
-                                <span class="label">${label}</span>
-                                <span class="value">${value.toFixed(2)}</span>
-                            </div>
-                        `).join('');
-                    
-                    if (oddsHtml) {
-                        marketsHtml += `
-                            <div class="market">
-                                <div class="market-name">${marketName}</div>
-                                <div class="odds">${oddsHtml}</div>
-                            </div>
-                        `;
-                    }
-                }
-            }
-        }
-        
+    let html = '';
+    
+    // Live matches section
+    if (liveMatches.length > 0) {
         html += `
-            <div class="match-card" data-match-id="${match.id}">
-                <span class="status-badge ${statusClass}">${status}</span>
-                
-                <div class="match-header">
-                    <div class="match-teams">
-                        ${match.home_team} <span class="vs">vs</span> ${match.away_team}
-                    </div>
-                </div>
-                
-                <div class="match-league">
-                    ${match.league || 'Unknown League'}
-                    <span class="competition-badge competition-${compClass}">${competitionType}</span>
-                </div>
-                
-                <div class="match-meta">
-                    <span class="status">
-                        <span class="dot ${statusClass}"></span>
-                        ${status}
-                    </span>
-                    <span class="date-time">📅 ${startTime}</span>
-                </div>
-                
-                ${marketsHtml ? `<div class="markets">${marketsHtml}</div>` : ''}
-                
-                <div class="match-actions">
-                    <button class="btn btn-primary analyze-match-btn" data-match-id="${match.id}">
-                        🤖 AI Analysis
-                    </button>
-                </div>
+            <div style="margin: 16px 0 8px 0; display: flex; align-items: center; gap: 10px;">
+                <span style="background: #ff1744; width: 10px; height: 10px; border-radius: 50%; display: inline-block; animation: pulse-dot 1s infinite;"></span>
+                <span style="font-weight: 600; color: #ff1744;">🔴 LIVE (${liveMatches.length})</span>
             </div>
-        `;
-    });
+            <div class="matches-grid">`;
+        
+        liveMatches.forEach(match => {
+            html += renderMatchCard(match);
+        });
+        
+        html += `</div>`;
+    }
     
-    html += '</div>';
+    // Upcoming matches section
+    if (upcomingMatches.length > 0) {
+        html += `
+            <div style="margin: 24px 0 8px 0; display: flex; align-items: center; gap: 10px;">
+                <span style="background: #ffab00; width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
+                <span style="font-weight: 600; color: #ffab00;">📅 UPCOMING (${upcomingMatches.length})</span>
+            </div>
+            <div class="matches-grid">`;
+        
+        upcomingMatches.forEach(match => {
+            html += renderMatchCard(match);
+        });
+        
+        html += `</div>`;
+    }
+    
     container.innerHTML = html;
     
     // Attach event listeners to analyze buttons
@@ -353,14 +380,96 @@ function renderMatches(matches) {
             }
         });
     });
+    
+    // Update stats
+    renderStats(filteredMatches, liveMatches, upcomingMatches);
 }
 
-function renderStats(matches) {
+function renderMatchCard(match) {
+    const status = getMatchStatus(match);
+    const statusClass = status.toLowerCase();
+    const competitionType = match.competition_type || 'Domestic League';
+    const compClass = competitionType.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const startTime = match.start_time ? formatDate(match.start_time) : 'Date TBD';
+    
+    // Build markets HTML
+    let marketsHtml = '';
+    if (match.markets) {
+        for (const [marketName, outcomes] of Object.entries(match.markets)) {
+            if (typeof outcomes === 'object' && outcomes !== null) {
+                const oddsHtml = Object.entries(outcomes)
+                    .filter(([_, value]) => value > 0)
+                    .map(([label, value]) => `
+                        <div class="odd-item">
+                            <span class="label">${label}</span>
+                            <span class="value">${value.toFixed(2)}</span>
+                        </div>
+                    `).join('');
+                
+                if (oddsHtml) {
+                    marketsHtml += `
+                        <div class="market">
+                            <div class="market-name">${marketName}</div>
+                            <div class="odds">${oddsHtml}</div>
+                        </div>
+                    `;
+                }
+            }
+        }
+    }
+    
+    return `
+        <div class="match-card" data-match-id="${match.id}">
+            <span class="status-badge ${statusClass}">${status}</span>
+            
+            <div class="match-header">
+                <div class="match-teams">
+                    ${match.home_team} <span class="vs">vs</span> ${match.away_team}
+                </div>
+            </div>
+            
+            <div class="match-league">
+                ${match.league || 'Unknown League'}
+                <span class="competition-badge competition-${compClass}">${competitionType}</span>
+            </div>
+            
+            <div class="match-meta">
+                <span class="status">
+                    <span class="dot ${statusClass}"></span>
+                    ${status}
+                </span>
+                <span class="date-time">📅 ${startTime}</span>
+            </div>
+            
+            ${marketsHtml ? `<div class="markets">${marketsHtml}</div>` : ''}
+            
+            <div class="match-actions">
+                <button class="btn btn-primary analyze-match-btn" data-match-id="${match.id}">
+                    🤖 AI Analysis
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function renderStats(matches, liveMatches, upcomingMatches) {
     const countEl = DOM.matchCount;
     const valueEl = DOM.valueBetCount;
+    const liveEl = DOM.liveCount;
+    const upcomingEl = DOM.upcomingCount;
+    const valueBadge = DOM.valueBadge;
+    const matchBadge = DOM.matchBadge;
     
-    if (countEl) countEl.textContent = matches?.length || 0;
-    if (valueEl) valueEl.textContent = matches?.length || 0; // Will be updated after analysis
+    const total = matches?.length || 0;
+    const live = liveMatches?.length || 0;
+    const upcoming = upcomingMatches?.length || 0;
+    
+    if (countEl) countEl.textContent = total;
+    if (valueEl) valueEl.textContent = total;
+    if (liveEl) liveEl.textContent = live;
+    if (upcomingEl) upcomingEl.textContent = upcoming;
+    if (valueBadge) valueBadge.textContent = total;
+    if (matchBadge) matchBadge.textContent = `${total} matches (${live} live)`;
 }
 
 function renderAISelection(analysis) {
@@ -369,8 +478,12 @@ function renderAISelection(analysis) {
     
     if (!analysis || !analysis.ai_selection) {
         container.innerHTML = `
+            <div class="title">
+                <span class="ai-icon">🧠</span>
+                AI Selection
+            </div>
             <div class="content">
-                Select a match and click "AI Analysis" to see the best value bet.
+                Select a match and click <span class="highlight">"AI Analysis"</span> to see the best value bet.
             </div>
         `;
         return;
@@ -498,13 +611,13 @@ async function handleRefresh() {
     try {
         const data = await fetchMatches(site, sport, league);
         renderMatches(data.matches);
-        renderStats(data.matches);
         
-        // Update match count
-        const countEl = DOM.matchCount;
-        if (countEl) countEl.textContent = data.count || 0;
+        // Count live and upcoming for badge
+        const live = data.matches?.filter(m => getMatchStatus(m).toLowerCase() === 'live') || [];
+        const upcoming = data.matches?.filter(m => getMatchStatus(m).toLowerCase() === 'upcoming') || [];
+        const total = live.length + upcoming.length;
         
-        showToast(`Loaded ${data.count || 0} matches`, 'success', 'Refreshed');
+        showToast(`Found ${total} live/upcoming matches`, 'success', 'Refreshed');
     } catch (error) {
         showToast('Failed to refresh matches', 'error', 'Refresh Error');
     }
@@ -514,7 +627,6 @@ async function handleSiteChange() {
     const site = DOM.siteSelect.value;
     AppState.currentSite = site;
     
-    // Update sports dropdown
     const sports = await fetchSports(site);
     if (DOM.sportSelect) {
         DOM.sportSelect.innerHTML = sports.map(s => 
@@ -522,7 +634,6 @@ async function handleSiteChange() {
         ).join('');
     }
     
-    // Update leagues dropdown
     const sport = AppState.currentSport;
     const leagues = await fetchLeagues(site, sport);
     if (DOM.leagueSelect) {
@@ -541,7 +652,6 @@ async function handleSportChange() {
     const sport = DOM.sportSelect.value;
     AppState.currentSport = sport;
     
-    // Update leagues dropdown
     const site = AppState.currentSite;
     const leagues = await fetchLeagues(site, sport);
     if (DOM.leagueSelect) {
@@ -582,19 +692,24 @@ async function handleAnalyzeAll() {
         return;
     }
     
+    // Filter out finished matches before analysis
+    const activeMatches = matches.filter(m => !isFinished(m));
+    if (activeMatches.length === 0) {
+        showToast('No live or upcoming matches to analyze', 'error', 'Analysis Error');
+        return;
+    }
+    
     try {
         setLoading(true);
         const siteName = DOM.siteSelect.options[DOM.siteSelect.selectedIndex]?.text || 'Unknown';
-        const results = await analyzeAllMatches(matches, siteName);
+        const results = await analyzeAllMatches(activeMatches, siteName);
         
         if (results) {
-            // Update value bet count
             const valueEl = DOM.valueBetCount;
             if (valueEl) valueEl.textContent = results.total_value_bets || 0;
             
             showToast(`Found ${results.total_value_bets} value bets!`, 'success', 'Analysis Complete');
             
-            // Show top bets in AI selection
             if (results.top_bets && results.top_bets.length > 0) {
                 const topBet = results.top_bets[0];
                 DOM.aiSelectionContainer.innerHTML = `
@@ -726,7 +841,7 @@ function toggleAutoRefresh() {
             DOM.autoRefreshToggle.textContent = '⏸️ Auto-Refresh On';
             DOM.autoRefreshToggle.classList.add('btn-success');
         }
-        AppState.refreshInterval = setInterval(handleRefresh, 60000); // 60 seconds
+        AppState.refreshInterval = setInterval(handleRefresh, 60000);
         showToast('Auto-refresh enabled (every 60s)', 'info', 'Auto-Refresh');
     } else {
         if (DOM.autoRefreshToggle) {
@@ -791,7 +906,7 @@ async function init() {
         DOM.statusDot.className = 'status-dot live';
     }
     
-    console.log('🚀 BetAnalyzer initialized!');
+    console.log('🚀 BetAnalyzer initialized (Live & Upcoming matches only)');
 }
 
 // Initialize when DOM is ready

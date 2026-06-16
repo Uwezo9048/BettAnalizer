@@ -56,6 +56,16 @@
             </div>
         </div>
 
+        <!-- Info Banner -->
+        <div style="background: #0d1422; border: 1px solid #1a2538; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <span style="font-size: 14px; color: #8aaccc;">🎯 Showing <strong style="color: #e8edf5;">Live</strong> and <strong style="color: #e8edf5;">Upcoming</strong> matches only</span>
+            <span style="font-size: 12px; color: #4a6a8a;">Finished matches are automatically hidden</span>
+            <div style="margin-left: auto; display: flex; gap: 16px; font-size: 12px;">
+                <span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ff1744; vertical-align: middle; margin-right: 4px;"></span> Live</span>
+                <span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ffab00; vertical-align: middle; margin-right: 4px;"></span> Upcoming</span>
+            </div>
+        </div>
+
         <!-- Loading Overlay -->
         <div id="loading-overlay" style="display: none; padding: 40px; text-align: center;">
             <div class="loading-spinner">
@@ -76,11 +86,7 @@
         <div class="quick-stats" id="stats-container">
             <div class="stat">
                 <div class="number" id="match-count">0</div>
-                <div class="label">📊 Matches</div>
-            </div>
-            <div class="stat">
-                <div class="number" id="value-bet-count">0</div>
-                <div class="label">💎 Value Bets</div>
+                <div class="label">📊 Active Matches</div>
             </div>
             <div class="stat">
                 <div class="number" id="live-count">0</div>
@@ -89,6 +95,10 @@
             <div class="stat">
                 <div class="number" id="upcoming-count">0</div>
                 <div class="label">📅 Upcoming</div>
+            </div>
+            <div class="stat">
+                <div class="number" id="value-bet-count">0</div>
+                <div class="label">💎 Value Bets</div>
             </div>
         </div>
 
@@ -155,7 +165,7 @@
         <!-- Footer -->
         <footer style="margin-top: 40px; padding: 20px; text-align: center; color: #4a6a8a; font-size: 12px; border-top: 1px solid #1a2538;">
             <p>⚡ BetAnalyzer v2.0 — AI Sports Betting Assistant</p>
-            <p>Data sourced from multiple APIs • Odds are for informational purposes only</p>
+            <p>📡 Showing <strong style="color: #e8edf5;">Live</strong> and <strong style="color: #e8edf5;">Upcoming</strong> matches only</p>
         </footer>
     </div>
 
