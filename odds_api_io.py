@@ -5,6 +5,7 @@ Provides real-time odds, value bet detection, and arbitrage opportunities
 """
 
 import os
+import requests
 from datetime import datetime
 from typing import List, Dict, Optional
 
@@ -23,11 +24,15 @@ except ImportError:
         print("⚠️ Odds-API.io SDK not installed. Run: pip install odds-api-io")
 
 class OddsAPIIO:
-    """Wrapper for Odds-API.io with value bet detection"""
+    """
+    Wrapper for Odds-API.io with real odds, value bet detection, and arbitrage
+    API Key: Get from https://odds-api.io/
+    """
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.environ.get('ODDS_API_IO_KEY', '')
         self.client = None
+        self.base_url = "https://api.odds-api.io/v1"
         self._init_client()
         
     def _init_client(self):
@@ -45,8 +50,11 @@ class OddsAPIIO:
             try:
                 self.client = OddsAPIClient(api_key=self.api_key)
             except TypeError:
-                # Some versions use a different init
-                self.client = OddsAPIClient(self.api_key)
+                try:
+                    self.client = OddsAPIClient(self.api_key)
+                except Exception:
+                    # Fallback to direct REST API
+                    self.client = self._create_rest_client()
             
             if self.client:
                 print("✅ Odds-API.io client initialized successfully")
@@ -54,6 +62,44 @@ class OddsAPIIO:
                 print("❌ Failed to initialize Odds-API.io client")
         except Exception as e:
             print(f"❌ Failed to initialize Odds-API.io client: {e}")
+            # Fallback to REST API
+            self.client = self._create_rest_client()
+    
+    def _create_rest_client(self):
+        """Create a REST-based client as fallback"""
+        return {
+            'type': 'rest',
+            'api_key': self.api_key,
+            'base_url': self.base_url
+        }
+    
+    def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
+        """Make a REST API request (fallback method)"""
+        if not self.api_key:
+            return None
+            
+        url = f"{self.base_url}/{endpoint}"
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Accept': 'application/json'
+        }
+        
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=15)
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 401:
+                print("❌ Invalid Odds-API.io API key")
+                return None
+            elif response.status_code == 429:
+                print("⚠️ Odds-API.io rate limit exceeded")
+                return None
+            else:
+                print(f"❌ Odds-API.io error: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ Odds-API.io request failed: {e}")
+            return None
     
     def get_live_events(self, sport: str = "soccer", limit: int = 30) -> List[Dict]:
         """
@@ -71,44 +117,69 @@ class OddsAPIIO:
             return []
             
         try:
-            # Try different API methods
-            try:
-                # Try get_live_events first
-                response = self.client.get_live_events(sport=sport)
-            except AttributeError:
-                try:
-                    # Try get_events
-                    response = self.client.get_events(sport=sport, live=True)
-                except AttributeError:
-                    # Try get_odds
-                    response = self.client.get_odds(sport=sport)
+            # Map sport names to Odds-API.io format
+            sport_map = {
+                'football': 'soccer',
+                'soccer': 'soccer',
+                'basketball': 'basketball',
+                'tennis': 'tennis',
+                'icehockey': 'ice_hockey',
+                'baseball': 'baseball',
+                'volleyball': 'volleyball',
+                'darts': 'darts',
+            }
+            api_sport = sport_map.get(sport.lower(), 'soccer')
             
-            # Parse response based on format
-            if response:
-                # Different response formats
-                if isinstance(response, dict):
-                    events = response.get('data', []) or response.get('events', []) or response.get('results', [])
-                elif isinstance(response, list):
-                    events = response
-                else:
-                    events = []
-                
-                if not events:
-                    print(f"[DEBUG] No events found for {sport}")
-                    return []
-                
-                # Standardize the events
-                standardized = []
-                for event in events[:limit]:
-                    standardized_event = self._standardize_event(event)
-                    if standardized_event:
-                        standardized.append(standardized_event)
-                
-                print(f"[DEBUG] Found {len(standardized)} events from Odds-API.io")
-                return standardized
-            else:
-                print(f"[DEBUG] No response from Odds-API.io")
+            events = []
+            
+            # Try SDK method first
+            if hasattr(self.client, 'get_live_events'):
+                try:
+                    response = self.client.get_live_events(sport=api_sport)
+                    if response:
+                        events = response.get('data', []) or response.get('events', [])
+                except Exception as e:
+                    print(f"[DEBUG] SDK get_live_events failed: {e}")
+            
+            # Fallback: Try get_events with live filter
+            if not events and hasattr(self.client, 'get_events'):
+                try:
+                    response = self.client.get_events(sport=api_sport, live=True)
+                    if response:
+                        events = response.get('data', []) or response.get('events', [])
+                except Exception as e:
+                    print(f"[DEBUG] SDK get_events failed: {e}")
+            
+            # Fallback: Try get_odds
+            if not events and hasattr(self.client, 'get_odds'):
+                try:
+                    response = self.client.get_odds(sport=api_sport)
+                    if response:
+                        events = response.get('data', []) or response.get('events', [])
+                except Exception as e:
+                    print(f"[DEBUG] SDK get_odds failed: {e}")
+            
+            # Final fallback: REST API
+            if not events:
+                print("[DEBUG] Trying REST API fallback...")
+                params = {'sport': api_sport, 'limit': limit}
+                response = self._make_request('events', params)
+                if response:
+                    events = response.get('data', []) or response.get('events', [])
+            
+            if not events:
+                print(f"[DEBUG] No events found for {sport}")
                 return []
+            
+            # Standardize the events
+            standardized = []
+            for event in events[:limit]:
+                standardized_event = self._standardize_event(event)
+                if standardized_event:
+                    standardized.append(standardized_event)
+            
+            print(f"[DEBUG] Found {len(standardized)} events from Odds-API.io")
+            return standardized
             
         except Exception as e:
             print(f"❌ Error fetching live events: {e}")
@@ -122,29 +193,47 @@ class OddsAPIIO:
             return []
             
         try:
-            # Try different methods
-            try:
-                if bookmaker:
-                    response = self.client.get_value_bets(bookmaker=bookmaker)
-                else:
-                    response = self.client.get_value_bets()
-            except AttributeError:
-                # Fallback: get value bets from events
+            bets = []
+            
+            # Try SDK method first
+            if hasattr(self.client, 'get_value_bets'):
+                try:
+                    params = {'bookmaker': bookmaker} if bookmaker else {}
+                    response = self.client.get_value_bets(**params)
+                    if response:
+                        bets = response.get('data', []) or response.get('bets', [])
+                except Exception as e:
+                    print(f"[DEBUG] SDK get_value_bets failed: {e}")
+            
+            # Fallback: Try get_arbitrage_bets with value flag
+            if not bets and hasattr(self.client, 'get_arbitrage_bets'):
+                try:
+                    params = {'bookmaker': bookmaker} if bookmaker else {}
+                    response = self.client.get_arbitrage_bets(**params)
+                    if response:
+                        all_bets = response.get('data', []) or response.get('bets', [])
+                        # Filter for value bets (positive edge)
+                        bets = [b for b in all_bets if b.get('edge', 0) > 0]
+                except Exception as e:
+                    print(f"[DEBUG] SDK get_arbitrage_bets failed: {e}")
+            
+            # Final fallback: REST API
+            if not bets:
+                print("[DEBUG] Trying REST API for value bets...")
+                params = {'bookmaker': bookmaker, 'limit': limit} if bookmaker else {'limit': limit}
+                response = self._make_request('value-bets', params)
+                if response:
+                    bets = response.get('data', []) or response.get('bets', [])
+            
+            if not bets:
+                # Calculate value bets from events as fallback
                 events = self.get_live_events(limit=30)
                 if events:
-                    return self._calculate_value_bets(events, bookmaker, limit)
-                return []
-            
-            if response:
-                if isinstance(response, dict):
-                    bets = response.get('data', []) or response.get('bets', []) or response.get('value_bets', [])
-                elif isinstance(response, list):
-                    bets = response
+                    bets = self._calculate_value_bets(events, bookmaker, limit)
                 else:
-                    bets = []
-                
-                return self._standardize_value_bets(bets[:limit])
-            return []
+                    return []
+            
+            return self._standardize_value_bets(bets[:limit])
             
         except Exception as e:
             print(f"❌ Error fetching value bets: {e}")
@@ -158,26 +247,34 @@ class OddsAPIIO:
             return []
             
         try:
-            # Try different methods
-            try:
-                response = self.client.get_arbitrage_bets(bookmakers=bookmakers)
-            except AttributeError:
-                # Fallback: calculate from events
+            opportunities = []
+            
+            # Try SDK method first
+            if hasattr(self.client, 'get_arbitrage_bets'):
+                try:
+                    response = self.client.get_arbitrage_bets(bookmakers=bookmakers)
+                    if response:
+                        opportunities = response.get('data', []) or response.get('opportunities', [])
+                except Exception as e:
+                    print(f"[DEBUG] SDK get_arbitrage_bets failed: {e}")
+            
+            # Fallback: REST API
+            if not opportunities:
+                print("[DEBUG] Trying REST API for arbitrage...")
+                params = {'bookmakers': bookmakers, 'limit': limit}
+                response = self._make_request('arbitrage', params)
+                if response:
+                    opportunities = response.get('data', []) or response.get('opportunities', [])
+            
+            if not opportunities:
+                # Calculate arbitrage from events as fallback
                 events = self.get_live_events(limit=30)
                 if events:
-                    return self._calculate_arbitrage(events, bookmakers, limit)
-                return []
-            
-            if response:
-                if isinstance(response, dict):
-                    opportunities = response.get('data', []) or response.get('opportunities', [])
-                elif isinstance(response, list):
-                    opportunities = response
+                    opportunities = self._calculate_arbitrage(events, bookmakers, limit)
                 else:
-                    opportunities = []
-                
-                return self._standardize_arbitrage(opportunities[:limit])
-            return []
+                    return []
+            
+            return self._standardize_arbitrage(opportunities[:limit])
             
         except Exception as e:
             print(f"❌ Error fetching arbitrage opportunities: {e}")
@@ -187,8 +284,20 @@ class OddsAPIIO:
         """Standardize an event for your app's format"""
         try:
             # Extract team names
-            home_team = event.get('home_team') or event.get('homeTeam') or event.get('home', 'Home')
-            away_team = event.get('away_team') or event.get('awayTeam') or event.get('away', 'Away')
+            home_team = (
+                event.get('home_team') or 
+                event.get('homeTeam') or 
+                event.get('home', 'Home')
+            )
+            away_team = (
+                event.get('away_team') or 
+                event.get('awayTeam') or 
+                event.get('away', 'Away')
+            )
+            
+            # Skip if no valid team names
+            if home_team == 'Home' or away_team == 'Away' or not home_team or not away_team:
+                return None
             
             # Extract markets
             markets = {}
@@ -208,31 +317,27 @@ class OddsAPIIO:
                                 outcomes[label] = price
                         
                         if outcomes:
-                            if '1x2' in market_name.lower() or 'match winner' in market_name.lower():
-                                markets['1X2'] = outcomes
-                            elif 'over/under' in market_name.lower() or 'total' in market_name.lower():
-                                markets['Over/Under'] = outcomes
-                            elif 'both teams to score' in market_name.lower() or 'gg' in market_name.lower():
-                                markets['GG/NG'] = outcomes
-                            elif 'double chance' in market_name.lower():
-                                markets['Double Chance'] = outcomes
-                            elif not markets:
-                                markets[market_name] = outcomes
+                            market_key = self._normalize_market_name(market_name)
+                            if market_key not in markets:
+                                markets[market_key] = outcomes
             
             elif isinstance(odds_data, dict):
                 for market_name, outcomes in odds_data.items():
                     if isinstance(outcomes, dict):
-                        markets[market_name] = outcomes
+                        market_key = self._normalize_market_name(market_name)
+                        markets[market_key] = outcomes
                     elif isinstance(outcomes, list):
                         for outcome in outcomes:
                             label = outcome.get('name', '')
                             price = outcome.get('price', 0)
                             if label and price > 0:
-                                if market_name not in markets:
-                                    markets[market_name] = {}
-                                markets[market_name][label] = price
+                                market_key = self._normalize_market_name(market_name)
+                                if market_key not in markets:
+                                    markets[market_key] = {}
+                                markets[market_key][label] = price
             
-            if not markets:
+            # If no markets found, return None
+            if not markets or not markets.get('1X2'):
                 return None
             
             return {
@@ -240,7 +345,7 @@ class OddsAPIIO:
                 'home_team': home_team,
                 'away_team': away_team,
                 'league': event.get('league') or event.get('competition') or 'Unknown League',
-                'country': event.get('country') or '',
+                'country': event.get('country') or event.get('region') or '',
                 'markets': markets,
                 'site': 'odds-api-io',
                 'live': event.get('live', False) or event.get('in_play', False),
@@ -251,6 +356,22 @@ class OddsAPIIO:
         except Exception as e:
             print(f"[DEBUG] Error standardizing event: {e}")
             return None
+    
+    def _normalize_market_name(self, market_name: str) -> str:
+        """Normalize market names to app format"""
+        market_lower = market_name.lower()
+        if '1x2' in market_lower or 'moneyline' in market_lower or 'match winner' in market_lower:
+            return '1X2'
+        elif 'over/under' in market_lower or 'total' in market_lower or 'ou' in market_lower:
+            return 'Over/Under'
+        elif 'both teams to score' in market_lower or 'gg' in market_lower or 'btts' in market_lower:
+            return 'GG/NG'
+        elif 'double chance' in market_lower:
+            return 'Double Chance'
+        elif 'handicap' in market_lower or 'spread' in market_lower:
+            return 'Handicap'
+        else:
+            return market_name
     
     def _standardize_value_bets(self, bets: List[Dict]) -> List[Dict]:
         """Standardize value bets"""
@@ -267,7 +388,7 @@ class OddsAPIIO:
                     'outcome': bet.get('outcome', ''),
                     'bookmaker_odds': bet.get('bookmaker_odds', 0),
                     'fair_odds': bet.get('fair_odds', 0),
-                    'value_edge': bet.get('value_edge', 0) or bet.get('edge', 0),
+                    'value_edge': round(bet.get('value_edge', 0) or bet.get('edge', 0), 1),
                     'confidence': bet.get('confidence', 50),
                     'recommendation': bet.get('recommendation', ''),
                     'stake': bet.get('stake', 0),
@@ -291,7 +412,7 @@ class OddsAPIIO:
                     'away_team': opp.get('event', {}).get('away_team', 'Away'),
                     'league': opp.get('event', {}).get('league', 'Unknown'),
                     'market': opp.get('market', '1X2'),
-                    'arbitrage_percentage': opp.get('arbitrage_percentage', 0) or opp.get('arb_percentage', 0),
+                    'arbitrage_percentage': round(opp.get('arbitrage_percentage', 0) or opp.get('arb_percentage', 0), 2),
                     'bookmakers': opp.get('bookmakers', []),
                     'outcomes': opp.get('outcomes', []),
                     'total_stake': opp.get('total_stake', 0),
@@ -311,15 +432,16 @@ class OddsAPIIO:
             markets = event.get('markets', {})
             for market_name, outcomes in markets.items():
                 for outcome, odds in outcomes.items():
-                    if odds > 0:
-                        # Simple value calculation
+                    if odds > 0 and isinstance(odds, (int, float)):
+                        # Simple value calculation with margin adjustment
                         implied_prob = 1 / odds
-                        true_prob = implied_prob * 0.95  # Adjust for margin
+                        # Assume 5% bookmaker margin
+                        true_prob = implied_prob * 0.95
                         edge = (true_prob * odds - 1) * 100
                         
-                        if edge > 5:
+                        if edge > 3:  # Only include positive value
                             value_bets.append({
-                                'id': abs(hash(f"{event['home_team']}_{outcome}")) % 1000000,
+                                'id': abs(hash(f"{event['home_team']}_{outcome}_{market_name}")) % 1000000,
                                 'match': f"{event['home_team']} vs {event['away_team']}",
                                 'home_team': event['home_team'],
                                 'away_team': event['away_team'],
@@ -327,28 +449,28 @@ class OddsAPIIO:
                                 'market': market_name,
                                 'outcome': outcome,
                                 'bookmaker_odds': odds,
-                                'fair_odds': 1 / true_prob,
+                                'fair_odds': round(1 / true_prob, 2),
                                 'value_edge': round(edge, 1),
                                 'confidence': min(90, 50 + edge),
-                                'recommendation': '✅ Value bet detected' if edge > 10 else '📈 Moderate value',
+                                'recommendation': '🔥 Strong Value' if edge > 10 else '✅ Good Value',
                                 'stake': round((edge / 100) * 10, 2),
                                 'from_api': True,
                                 'source': 'odds-api-io-calculated',
                                 'last_updated': datetime.now().isoformat()
                             })
+        value_bets.sort(key=lambda x: x['value_edge'], reverse=True)
         return value_bets[:limit]
     
     def _calculate_arbitrage(self, events, bookmakers, limit=10):
         """Calculate arbitrage opportunities (fallback)"""
-        # Simple arbitrage detection across bookmakers
         arb_opps = []
         for event in events:
             markets = event.get('markets', {})
             for market_name, outcomes in markets.items():
                 if len(outcomes) >= 2:
-                    # Check if any arbitrage exists
-                    total_implied = sum(1/odds for odds in outcomes.values() if odds > 0)
-                    if total_implied < 0.95:  # Arbitrage opportunity
+                    # Check if arbitrage exists
+                    total_implied = sum(1/odds for odds in outcomes.values() if isinstance(odds, (int, float)) and odds > 0)
+                    if total_implied < 0.98:  # Arbitrage opportunity
                         arb_opps.append({
                             'id': abs(hash(f"{event['home_team']}_{market_name}_arb")) % 1000000,
                             'match': f"{event['home_team']} vs {event['away_team']}",
@@ -357,7 +479,7 @@ class OddsAPIIO:
                             'league': event.get('league', 'Unknown'),
                             'market': market_name,
                             'arbitrage_percentage': round((1 - total_implied) * 100, 1),
-                            'bookmakers': ['Multiple'],
+                            'bookmakers': ['Multiple Bookmakers'],
                             'outcomes': list(outcomes.keys()),
                             'total_stake': 100,
                             'guaranteed_return': round(100 / total_implied, 2),
