@@ -16,8 +16,7 @@ const AppState = {
     isLoading: false,
     autoRefresh: false,
     refreshInterval: null,
-    selectedMatch: null,
-    showFinished: false // New: filter for finished matches
+    selectedMatch: null
 };
 
 // ============================================
@@ -34,7 +33,6 @@ const DOM = {
     refreshBtn: document.getElementById('refresh-btn'),
     analyzeAllBtn: document.getElementById('analyze-all-btn'),
     autoRefreshToggle: document.getElementById('auto-refresh-toggle'),
-    filterToggle: document.getElementById('filter-toggle'),
     
     // Containers
     matchesContainer: document.getElementById('matches-container'),
@@ -64,6 +62,7 @@ const DOM = {
     // Betslip
     slipInput: document.getElementById('slip-input'),
     slipAnalyzeBtn: document.getElementById('slip-analyze-btn'),
+    slipClearBtn: document.getElementById('slip-clear-btn'),
     slipResults: document.getElementById('slip-results'),
     
     // Toast
@@ -117,29 +116,18 @@ function setLoading(isLoading) {
 // Filter Functions
 // ============================================
 
-function filterMatches(matches) {
-    if (!matches || matches.length === 0) return [];
-    
-    // Only keep Live and Upcoming matches (exclude Finished)
-    return matches.filter(match => {
-        const status = (match.status || 'Upcoming').toLowerCase();
-        return status === 'live' || status === 'upcoming' || status === 'not_started';
-    });
-}
-
 function getMatchStatus(match) {
-    // Determine status if not set
     if (!match.status) {
         if (match.start_time) {
             try {
                 const start = new Date(match.start_time);
                 const now = new Date();
                 const diff = start - now;
-                if (diff < 0 && diff > -7200000) { // Within last 2 hours
+                if (diff < 0 && diff > -7200000) {
                     return 'Live';
                 } else if (diff < 0) {
                     return 'Finished';
-                } else if (diff < 3600000) { // Within next hour
+                } else if (diff < 3600000) {
                     return 'Live';
                 } else {
                     return 'Upcoming';
@@ -224,7 +212,6 @@ async function fetchMatches(site, sport, league = null) {
             })
         });
         
-        // Store all matches, but filter for display
         AppState.matches = data.matches || [];
         return data;
     } catch (error) {
@@ -294,7 +281,8 @@ async function analyzeSlip(text) {
         });
         
         if (!response.ok) {
-            throw new Error('Slip analysis failed');
+            const error = await response.json();
+            throw new Error(error.error || 'Slip analysis failed');
         }
         
         return await response.json();
@@ -312,7 +300,6 @@ function renderMatches(matches) {
     const container = DOM.matchesContainer;
     if (!container) return;
     
-    // Filter out finished matches
     const filteredMatches = matches ? matches.filter(m => !isFinished(m)) : [];
     const liveMatches = filteredMatches.filter(m => getMatchStatus(m).toLowerCase() === 'live');
     const upcomingMatches = filteredMatches.filter(m => getMatchStatus(m).toLowerCase() === 'upcoming');
@@ -331,12 +318,10 @@ function renderMatches(matches) {
         return;
     }
     
-    // Sort: Live matches first, then upcoming
     const sortedMatches = [...liveMatches, ...upcomingMatches];
     
     let html = '';
     
-    // Live matches section
     if (liveMatches.length > 0) {
         html += `
             <div style="margin: 16px 0 8px 0; display: flex; align-items: center; gap: 10px;">
@@ -352,7 +337,6 @@ function renderMatches(matches) {
         html += `</div>`;
     }
     
-    // Upcoming matches section
     if (upcomingMatches.length > 0) {
         html += `
             <div style="margin: 24px 0 8px 0; display: flex; align-items: center; gap: 10px;">
@@ -370,7 +354,6 @@ function renderMatches(matches) {
     
     container.innerHTML = html;
     
-    // Attach event listeners to analyze buttons
     container.querySelectorAll('.analyze-match-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
             const matchId = parseInt(btn.dataset.matchId);
@@ -381,7 +364,6 @@ function renderMatches(matches) {
         });
     });
     
-    // Update stats
     renderStats(filteredMatches, liveMatches, upcomingMatches);
 }
 
@@ -392,7 +374,6 @@ function renderMatchCard(match) {
     const compClass = competitionType.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const startTime = match.start_time ? formatDate(match.start_time) : 'Date TBD';
     
-    // Build markets HTML
     let marketsHtml = '';
     if (match.markets) {
         for (const [marketName, outcomes] of Object.entries(match.markets)) {
@@ -453,23 +434,16 @@ function renderMatchCard(match) {
 }
 
 function renderStats(matches, liveMatches, upcomingMatches) {
-    const countEl = DOM.matchCount;
-    const valueEl = DOM.valueBetCount;
-    const liveEl = DOM.liveCount;
-    const upcomingEl = DOM.upcomingCount;
-    const valueBadge = DOM.valueBadge;
-    const matchBadge = DOM.matchBadge;
-    
     const total = matches?.length || 0;
     const live = liveMatches?.length || 0;
     const upcoming = upcomingMatches?.length || 0;
     
-    if (countEl) countEl.textContent = total;
-    if (valueEl) valueEl.textContent = total;
-    if (liveEl) liveEl.textContent = live;
-    if (upcomingEl) upcomingEl.textContent = upcoming;
-    if (valueBadge) valueBadge.textContent = total;
-    if (matchBadge) matchBadge.textContent = `${total} matches (${live} live)`;
+    if (DOM.matchCount) DOM.matchCount.textContent = total;
+    if (DOM.valueBetCount) DOM.valueBetCount.textContent = total;
+    if (DOM.liveCount) DOM.liveCount.textContent = live;
+    if (DOM.upcomingCount) DOM.upcomingCount.textContent = upcoming;
+    if (DOM.valueBadge) DOM.valueBadge.textContent = total;
+    if (DOM.matchBadge) DOM.matchBadge.textContent = `${total} matches (${live} live)`;
 }
 
 function renderAISelection(analysis) {
@@ -561,6 +535,140 @@ function renderAnalysisResults(analysis) {
 }
 
 // ============================================
+// Betslip Results Display - Detailed
+// ============================================
+
+function displaySlipResults(result) {
+    const container = DOM.slipResults;
+    if (!container) return;
+    
+    if (!result || result.error) {
+        container.innerHTML = `
+            <div style="color: #ff1744; padding: 12px; text-align: center;">
+                ❌ ${result?.error || 'Analysis failed'}
+            </div>
+        `;
+        container.classList.add('visible');
+        return;
+    }
+    
+    let html = '';
+    
+    // OCR text if available
+    if (result.ocr_text) {
+        html += `
+            <div style="background: #141b2b; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                <div style="color: #6a8aaa; font-size: 12px; margin-bottom: 4px;">📝 Detected Text:</div>
+                <div style="color: #e8edf5; font-size: 13px; white-space: pre-wrap; font-family: monospace;">${result.ocr_text}</div>
+            </div>
+        `;
+    }
+    
+    // Stats cards
+    if (result.total_selections) {
+        html += `
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 20px; font-weight: 700; color: #e8edf5;">${result.total_selections}</div>
+                    <div style="font-size: 11px; color: #6a8aaa;">Total</div>
+                </div>
+                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 20px; font-weight: 700; color: #00c853;">${result.kept_count}</div>
+                    <div style="font-size: 11px; color: #6a8aaa;">Kept ✅</div>
+                </div>
+                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 20px; font-weight: 700; color: #ff1744;">${result.removed_count}</div>
+                    <div style="font-size: 11px; color: #6a8aaa;">Removed ❌</div>
+                </div>
+                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 20px; font-weight: 700; color: #ffab00;">${result.average_confidence || 0}%</div>
+                    <div style="font-size: 11px; color: #6a8aaa;">Confidence</div>
+                </div>
+            </div>
+        `;
+        
+        // Kept Selections - Show in detail
+        if (result.kept && result.kept.length > 0) {
+            html += `
+                <div style="margin-top: 12px; background: #0a1a0a; border: 1px solid #00c853; border-radius: 8px; padding: 12px;">
+                    <div style="color: #00c853; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                        ✅ KEPT SELECTIONS (${result.kept.length})
+                        <span style="font-size: 11px; color: #6a8aaa; font-weight: 400;">- These are good bets to keep</span>
+                    </div>
+                    ${result.kept.map((sel, i) => `
+                        <div style="background: #0d1a0d; padding: 10px 14px; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid #00c853;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                                <span style="font-weight: 500; color: #e8edf5;">${sel.match || sel.selection || 'Unknown Match'}</span>
+                                <span style="color: #00c853; font-weight: 600;">${sel.odds || 'N/A'}</span>
+                            </div>
+                            <div style="display: flex; gap: 16px; font-size: 12px; color: #6a8aaa; margin-top: 4px; flex-wrap: wrap;">
+                                <span>Market: ${sel.market || 'N/A'}</span>
+                                <span>Confidence: ${sel.confidence || 0}%</span>
+                                <span>Value Edge: ${sel.value_edge || 0}%</span>
+                                <span>Stake: $${sel.suggested_stake || 0}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        
+        // Removed Selections - Show in detail with reasons
+        if (result.removed && result.removed.length > 0) {
+            html += `
+                <div style="margin-top: 12px; background: #1a0a0a; border: 1px solid #ff1744; border-radius: 8px; padding: 12px;">
+                    <div style="color: #ff1744; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                        ❌ REMOVED SELECTIONS (${result.removed.length})
+                        <span style="font-size: 11px; color: #6a8aaa; font-weight: 400;">- Risky bets to avoid</span>
+                    </div>
+                    ${result.removed.map((sel, i) => `
+                        <div style="background: #1a0d0d; padding: 10px 14px; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid #ff1744;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                                <span style="font-weight: 500; color: #e8edf5;">${sel.match || sel.selection || 'Unknown Match'}</span>
+                                <span style="color: #ff6b6b; font-weight: 600;">${sel.odds || 'N/A'}</span>
+                            </div>
+                            <div style="display: flex; gap: 16px; font-size: 12px; color: #6a8aaa; margin-top: 4px; flex-wrap: wrap;">
+                                <span>Market: ${sel.market || 'N/A'}</span>
+                                <span>Confidence: ${sel.confidence || 0}%</span>
+                                <span>Value Edge: ${sel.value_edge || 0}%</span>
+                                <span style="color: #ff6b6b;">⚠️ Reason: ${sel.reason || 'Too risky'}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        
+        // Odds comparison
+        html += `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
+                <div style="background: #141b2b; padding: 12px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 11px; color: #6a8aaa;">Original Combined Odds</div>
+                    <div style="font-size: 22px; font-weight: 700; color: #ff6b6b;">${result.original_combined_odds}</div>
+                </div>
+                <div style="background: #141b2b; padding: 12px; border-radius: 8px; text-align: center; border: 1px solid #00c853;">
+                    <div style="font-size: 11px; color: #6a8aaa;">Suggested Combined Odds</div>
+                    <div style="font-size: 22px; font-weight: 700; color: #00c853;">${result.suggested_combined_odds}</div>
+                </div>
+            </div>
+        `;
+        
+        // Summary
+        if (result.summary) {
+            html += `
+                <div style="margin-top: 12px; background: #0d1422; border: 1px solid #2a3a5a; border-radius: 8px; padding: 12px;">
+                    <div style="color: #ffab00; font-weight: 600; margin-bottom: 4px;">📌 Summary</div>
+                    <div style="color: #8aaccc; font-size: 14px;">${result.summary}</div>
+                </div>
+            `;
+        }
+    }
+    
+    container.innerHTML = html;
+    container.classList.add('visible');
+}
+
+// ============================================
 // Date Formatting
 // ============================================
 
@@ -572,12 +680,10 @@ function formatDate(dateStr) {
         const now = new Date();
         const diff = date - now;
         
-        // If date is in the past
         if (diff < 0) {
             return `📅 ${date.toLocaleDateString()} ${date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
         }
         
-        // If date is within 24 hours
         if (diff < 24 * 60 * 60 * 1000) {
             const hours = Math.floor(diff / (60 * 60 * 1000));
             if (hours < 1) {
@@ -587,7 +693,6 @@ function formatDate(dateStr) {
             return `⏰ ${hours}h from now`;
         }
         
-        // Future date
         const days = Math.floor(diff / (24 * 60 * 60 * 1000));
         if (days < 7) {
             return `📅 ${date.toLocaleDateString('en-US', {weekday: 'short'})} ${date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
@@ -612,7 +717,6 @@ async function handleRefresh() {
         const data = await fetchMatches(site, sport, league);
         renderMatches(data.matches);
         
-        // Count live and upcoming for badge
         const live = data.matches?.filter(m => getMatchStatus(m).toLowerCase() === 'live') || [];
         const upcoming = data.matches?.filter(m => getMatchStatus(m).toLowerCase() === 'upcoming') || [];
         const total = live.length + upcoming.length;
@@ -692,7 +796,6 @@ async function handleAnalyzeAll() {
         return;
     }
     
-    // Filter out finished matches before analysis
     const activeMatches = matches.filter(m => !isFinished(m));
     if (activeMatches.length === 0) {
         showToast('No live or upcoming matches to analyze', 'error', 'Analysis Error');
@@ -705,8 +808,7 @@ async function handleAnalyzeAll() {
         const results = await analyzeAllMatches(activeMatches, siteName);
         
         if (results) {
-            const valueEl = DOM.valueBetCount;
-            if (valueEl) valueEl.textContent = results.total_value_bets || 0;
+            if (DOM.valueBetCount) DOM.valueBetCount.textContent = results.total_value_bets || 0;
             
             showToast(`Found ${results.total_value_bets} value bets!`, 'success', 'Analysis Complete');
             
@@ -801,25 +903,8 @@ async function handleSlipAnalysis() {
     try {
         setLoading(true);
         const result = await analyzeSlip(text);
-        
         if (result) {
-            const container = DOM.slipResults;
-            if (container) {
-                let html = `
-                    <div class="result-item"><span class="key">Total Selections</span><span class="value">${result.total_selections}</span></div>
-                    <div class="result-item"><span class="key">Kept</span><span class="value positive">${result.kept_count}</span></div>
-                    <div class="result-item"><span class="key">Removed</span><span class="value negative">${result.removed_count}</span></div>
-                    <div class="result-item"><span class="key">Original Combined Odds</span><span class="value">${result.original_combined_odds}</span></div>
-                    <div class="result-item"><span class="key">Suggested Combined Odds</span><span class="value positive">${result.suggested_combined_odds}</span></div>
-                    <div class="result-item"><span class="key">Average Confidence</span><span class="value">${result.average_confidence}%</span></div>
-                    <div class="result-item" style="border-top: 2px solid #2a3a5a; margin-top: 8px; padding-top: 12px;">
-                        <span class="key">Summary</span>
-                        <span class="value">${result.summary}</span>
-                    </div>
-                `;
-                container.innerHTML = html;
-                container.classList.add('visible');
-            }
+            displaySlipResults(result);
             showToast('Betslip analysis complete!', 'success', 'Betslip Analysis');
         }
     } catch (error) {
@@ -827,6 +912,15 @@ async function handleSlipAnalysis() {
     } finally {
         setLoading(false);
     }
+}
+
+function clearSlip() {
+    if (DOM.slipInput) DOM.slipInput.value = '';
+    if (DOM.slipResults) {
+        DOM.slipResults.innerHTML = '';
+        DOM.slipResults.classList.remove('visible');
+    }
+    showToast('Cleared', 'info', 'Betslip');
 }
 
 // ============================================
@@ -851,6 +945,33 @@ function toggleAutoRefresh() {
         clearInterval(AppState.refreshInterval);
         showToast('Auto-refresh disabled', 'info', 'Auto-Refresh');
     }
+}
+
+// ============================================
+// Betslip Tab Switching
+// ============================================
+
+function initBetslipTabs() {
+    const tabs = document.querySelectorAll('.slip-tab');
+    if (!tabs.length) return;
+    
+    tabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+            tabs.forEach(t => {
+                t.classList.remove('active', 'btn-primary');
+                t.classList.add('btn-secondary');
+            });
+            this.classList.add('active', 'btn-primary');
+            this.classList.remove('btn-secondary');
+            
+            const tabName = this.dataset.tab;
+            document.querySelectorAll('.slip-tab-content').forEach(content => {
+                content.style.display = 'none';
+            });
+            const target = document.getElementById(`slip-${tabName}-tab`);
+            if (target) target.style.display = 'block';
+        });
+    });
 }
 
 // ============================================
@@ -894,6 +1015,10 @@ async function init() {
     DOM.autoRefreshToggle?.addEventListener('click', toggleAutoRefresh);
     DOM.manualPredictBtn?.addEventListener('click', handleCustomPredict);
     DOM.slipAnalyzeBtn?.addEventListener('click', handleSlipAnalysis);
+    DOM.slipClearBtn?.addEventListener('click', clearSlip);
+    
+    // Initialize betslip tabs
+    initBetslipTabs();
     
     // Load initial matches
     await handleRefresh();
@@ -906,278 +1031,8 @@ async function init() {
         DOM.statusDot.className = 'status-dot live';
     }
     
-    console.log('🚀 BetAnalyzer initialized (Live & Upcoming matches only)');
+    console.log('🚀 BetAnalyzer initialized!');
 }
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', init);
-
-// ============================================
-// Betslip Image Upload & OCR
-// ============================================
-
-// Tab switching
-document.querySelectorAll('.slip-tab').forEach(tab => {
-    tab.addEventListener('click', function() {
-        // Update tabs
-        document.querySelectorAll('.slip-tab').forEach(t => t.classList.remove('active'));
-        this.classList.add('active');
-        this.classList.remove('btn-secondary');
-        this.classList.add('btn-primary');
-        document.querySelectorAll('.slip-tab').forEach(t => {
-            if (!t.classList.contains('active')) {
-                t.classList.remove('btn-primary');
-                t.classList.add('btn-secondary');
-            }
-        });
-        
-        // Show/hide content
-        const tabName = this.dataset.tab;
-        document.querySelectorAll('.slip-tab-content').forEach(content => {
-            content.style.display = 'none';
-        });
-        document.getElementById(`slip-${tabName}-tab`).style.display = 'block';
-    });
-});
-
-// Drop zone functionality
-const dropZone = document.getElementById('drop-zone');
-const imageInput = document.getElementById('slip-image-input');
-const previewContainer = document.getElementById('image-preview-container');
-const imagePreview = document.getElementById('image-preview');
-const imageFilename = document.getElementById('image-filename');
-
-let uploadedFile = null;
-
-// Click to browse
-dropZone.addEventListener('click', () => {
-    imageInput.click();
-});
-
-// File selection
-imageInput.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-        handleFile(e.target.files[0]);
-    }
-});
-
-// Drag and drop
-dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.style.borderColor = '#7b2ffc';
-    dropZone.style.background = '#141b2b';
-});
-
-dropZone.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    dropZone.style.borderColor = '#2a3a5a';
-    dropZone.style.background = '#0a0e17';
-});
-
-dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.style.borderColor = '#2a3a5a';
-    dropZone.style.background = '#0a0e17';
-    
-    if (e.dataTransfer.files.length > 0) {
-        handleFile(e.dataTransfer.files[0]);
-    }
-});
-
-function handleFile(file) {
-    if (!file.type.startsWith('image/')) {
-        showToast('Please upload an image file', 'error', 'Invalid File');
-        return;
-    }
-    
-    uploadedFile = file;
-    
-    // Show preview
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        imagePreview.src = e.target.result;
-        imageFilename.textContent = file.name;
-        previewContainer.style.display = 'block';
-        dropZone.style.display = 'none';
-        showToast('Image uploaded successfully!', 'success', 'Upload Complete');
-    };
-    reader.readAsDataURL(file);
-}
-
-// Remove image
-document.getElementById('slip-image-remove-btn')?.addEventListener('click', () => {
-    uploadedFile = null;
-    previewContainer.style.display = 'none';
-    dropZone.style.display = 'block';
-    imageInput.value = '';
-    document.getElementById('slip-image-results')?.classList.remove('visible');
-});
-
-// Analyze image (OCR)
-document.getElementById('slip-image-analyze-btn')?.addEventListener('click', async () => {
-    if (!uploadedFile) {
-        showToast('Please upload an image first', 'error', 'No Image');
-        return;
-    }
-    
-    try {
-        setLoading(true);
-        
-        // Create form data for image upload
-        const formData = new FormData();
-        formData.append('screenshot', uploadedFile);
-        
-        const response = await fetch('/api/analyze-slip', {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'OCR analysis failed');
-        }
-        
-        const result = await response.json();
-        displaySlipResults(result);
-        
-        if (result.ocr_text) {
-            // Also populate the text area with OCR text
-            document.getElementById('slip-input').value = result.ocr_text;
-        }
-        
-        showToast('Image analyzed successfully!', 'success', 'OCR Complete');
-    } catch (error) {
-        showToast(error.message, 'error', 'OCR Error');
-    } finally {
-        setLoading(false);
-    }
-});
-
-// Clear text
-document.getElementById('slip-clear-btn')?.addEventListener('click', () => {
-    document.getElementById('slip-input').value = '';
-    document.getElementById('slip-results').classList.remove('visible');
-    document.getElementById('slip-results').innerHTML = '';
-    showToast('Cleared', 'info', 'Betslip');
-});
-
-// Display slip results
-function displaySlipResults(result) {
-    const container = document.getElementById('slip-results');
-    if (!container) return;
-    
-    let html = '';
-    
-    // OCR text if available
-    if (result.ocr_text) {
-        html += `
-            <div style="background: #141b2b; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
-                <div style="color: #6a8aaa; font-size: 12px; margin-bottom: 4px;">📝 Detected Text:</div>
-                <div style="color: #e8edf5; font-size: 13px; white-space: pre-wrap; font-family: monospace;">${result.ocr_text}</div>
-            </div>
-        `;
-    }
-    
-    // Results
-    if (result.total_selections) {
-        html += `
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px;">
-                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 20px; font-weight: 700; color: #e8edf5;">${result.total_selections}</div>
-                    <div style="font-size: 11px; color: #6a8aaa;">Total</div>
-                </div>
-                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 20px; font-weight: 700; color: #00c853;">${result.kept_count}</div>
-                    <div style="font-size: 11px; color: #6a8aaa;">Kept ✅</div>
-                </div>
-                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 20px; font-weight: 700; color: #ff1744;">${result.removed_count}</div>
-                    <div style="font-size: 11px; color: #6a8aaa;">Removed ❌</div>
-                </div>
-            </div>
-            <div class="result-item">
-                <span class="key">Original Combined Odds</span>
-                <span class="value">${result.original_combined_odds}</span>
-            </div>
-            <div class="result-item">
-                <span class="key">Suggested Combined Odds</span>
-                <span class="value positive">${result.suggested_combined_odds}</span>
-            </div>
-            <div class="result-item">
-                <span class="key">Average Confidence</span>
-                <span class="value">${result.average_confidence}%</span>
-            </div>
-        `;
-        
-        // Show kept selections
-        if (result.kept && result.kept.length > 0) {
-            html += `
-                <div style="margin-top: 12px; border-top: 1px solid #1a2538; padding-top: 12px;">
-                    <div style="color: #00c853; font-weight: 600; margin-bottom: 8px;">✅ Kept Selections</div>
-                    ${result.kept.map((sel, i) => `
-                        <div style="background: #141b2b; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 13px; display: flex; justify-content: space-between;">
-                            <span>${sel.match || sel.selection}</span>
-                            <span style="color: #00c853;">${sel.odds} (${sel.confidence}%)</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-        
-        // Show removed selections
-        if (result.removed && result.removed.length > 0) {
-            html += `
-                <div style="margin-top: 12px; border-top: 1px solid #1a2538; padding-top: 12px;">
-                    <div style="color: #ff1744; font-weight: 600; margin-bottom: 8px;">❌ Removed Selections</div>
-                    ${result.removed.map((sel, i) => `
-                        <div style="background: #141b2b; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 13px; display: flex; justify-content: space-between;">
-                            <span>${sel.match || sel.selection}</span>
-                            <span style="color: #ff6b6b;">${sel.reason || 'Risky'}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-        
-        // Summary
-        if (result.summary) {
-            html += `
-                <div style="margin-top: 12px; border-top: 1px solid #2a3a5a; padding-top: 12px;">
-                    <div style="color: #ffab00; font-weight: 600; margin-bottom: 4px;">📌 Summary</div>
-                    <div style="color: #8aaccc; font-size: 14px;">${result.summary}</div>
-                </div>
-            `;
-        }
-    } else if (result.error) {
-        html += `
-            <div style="color: #ff1744; padding: 12px; text-align: center;">
-                ❌ ${result.error}
-            </div>
-        `;
-    }
-    
-    container.innerHTML = html;
-    container.classList.add('visible');
-}
-
-// Override the existing slip analyze handler to use displaySlipResults
-document.getElementById('slip-analyze-btn')?.addEventListener('click', async () => {
-    const text = document.getElementById('slip-input')?.value?.trim();
-    if (!text) {
-        showToast('Please paste your betslip text', 'error', 'Missing Input');
-        return;
-    }
-    
-    try {
-        setLoading(true);
-        const result = await analyzeSlip(text);
-        if (result) {
-            displaySlipResults(result);
-            showToast('Betslip analysis complete!', 'success', 'Betslip Analysis');
-        }
-    } catch (error) {
-        showToast('Betslip analysis failed', 'error', 'Error');
-    } finally {
-        setLoading(false);
-    }
-});
