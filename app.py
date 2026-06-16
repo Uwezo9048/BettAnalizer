@@ -30,6 +30,31 @@ from live_odds_fetcher import (
 ai = get_ai()
 fetcher = get_fetcher()
 
+# ========== FORCE TESSERACT PATH ==========
+import pytesseract
+
+# Set Tesseract path explicitly for Windows
+TESSERACT_PATHS = [
+    r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+    r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+    '/usr/bin/tesseract',
+    '/usr/local/bin/tesseract',
+]
+
+for path in TESSERACT_PATHS:
+    if os.path.exists(path):
+        pytesseract.pytesseract.tesseract_cmd = path
+        print(f"✅ Tesseract found at: {path}")
+        break
+else:
+    # Try environment variable
+    env_path = os.environ.get('TESSERACT_CMD')
+    if env_path and os.path.exists(env_path):
+        pytesseract.pytesseract.tesseract_cmd = env_path
+        print(f"✅ Tesseract found at: {env_path}")
+    else:
+        print("⚠️ Tesseract not found. OCR will not work.")
+
 # ========== Routes ==========
 
 @app.route('/')
@@ -265,95 +290,197 @@ def custom_predict():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== Betslip Analyzer with OCR Support ==========
-
-def _ocr_available():
-    """Check if OCR is available"""
-    try:
-        import pytesseract
-        from PIL import Image
-        import subprocess
-        try:
-            subprocess.run(['tesseract', '--version'], capture_output=True, check=True)
-            return True
-        except (subprocess.SubprocessError, FileNotFoundError):
-            return False
-    except Exception:
-        return False
+# ========== OCR Helper Functions ==========
 
 def _get_tesseract_command():
-    """Get tesseract command path"""
-    common_paths = [
+    """Get tesseract command path - Windows optimized"""
+    # First check environment variable
+    env_cmd = os.environ.get('TESSERACT_CMD')
+    if env_cmd and os.path.exists(env_cmd):
+        return env_cmd
+    
+    # Check common Windows paths first
+    windows_paths = [
         r'C:\Program Files\Tesseract-OCR\tesseract.exe',
         r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+    ]
+    
+    for path in windows_paths:
+        if os.path.exists(path):
+            print(f"[OCR] Found Tesseract at: {path}")
+            return path
+    
+    # Linux/macOS paths
+    linux_paths = [
         '/usr/bin/tesseract',
         '/usr/local/bin/tesseract',
         '/opt/homebrew/bin/tesseract',
     ]
     
-    for path in common_paths:
+    for path in linux_paths:
         if os.path.exists(path):
             return path
     
+    # Try to find via which command
     try:
         import shutil
-        return shutil.which('tesseract')
+        which_path = shutil.which('tesseract')
+        if which_path:
+            return which_path
     except:
-        return None
+        pass
+    
+    return None
+
+def _ocr_available():
+    """Check if OCR is available - Windows optimized"""
+    try:
+        import pytesseract
+        from PIL import Image
+        
+        # Check if Tesseract is accessible
+        tesseract_cmd = _get_tesseract_command()
+        if tesseract_cmd and os.path.exists(tesseract_cmd):
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            # Try to get version to confirm it works
+            try:
+                version = pytesseract.get_tesseract_version()
+                print(f"[OCR] Tesseract version: {version}")
+                return True
+            except:
+                # Version check might fail but OCR could still work
+                return True
+        
+        # Try using the default system PATH
+        try:
+            import subprocess
+            subprocess.run(['tesseract', '--version'], capture_output=True, check=True)
+            return True
+        except:
+            return False
+            
+    except Exception as e:
+        print(f"[OCR] Error checking availability: {e}")
+        return False
 
 def _extract_text_from_image(uploaded_file):
-    """Extract text from uploaded image using OCR"""
+    """Extract text from uploaded image using OCR with enhanced preprocessing"""
     if not uploaded_file:
         return ''
     
     try:
+        # Check if OCR is available
         if not _ocr_available():
             print("[OCR] Tesseract not available.")
             return ''
         
         from io import BytesIO
         import pytesseract
-        from PIL import Image, ImageEnhance, ImageFilter
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
         
+        # Set tesseract command
         tesseract_cmd = _get_tesseract_command()
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            print(f"[OCR] Using Tesseract at: {tesseract_cmd}")
         
+        # Read image
         image = Image.open(BytesIO(uploaded_file.read()))
+        print(f"[OCR] Original image size: {image.size}, mode: {image.mode}")
         
-        # Preprocess image
+        # ========== Enhanced Preprocessing ==========
+        
+        # 1. Convert to grayscale
         if image.mode != 'L':
             image = image.convert('L')
+        print(f"[OCR] Converted to grayscale")
         
-        enhancer = ImageEnhance.Contrast(image)
-        image = enhancer.enhance(2.0)
-        image = image.filter(ImageFilter.SHARPEN)
-        
+        # 2. Resize if too small (improves OCR accuracy)
         width, height = image.size
-        if width < 800:
-            new_width = 800
-            new_height = int(height * (800 / width))
+        if width < 1000:
+            new_width = 1000
+            new_height = int(height * (1000 / width))
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            print(f"[OCR] Resized to: {image.size}")
+        
+        # 3. Enhance contrast
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(2.5)
+        print(f"[OCR] Enhanced contrast")
+        
+        # 4. Apply sharpening
+        image = image.filter(ImageFilter.SHARPEN)
+        print(f"[OCR] Applied sharpening")
+        
+        # 5. Apply slight blur to reduce noise
+        image = image.filter(ImageFilter.GaussianBlur(radius=0.5))
+        print(f"[OCR] Applied slight blur to reduce noise")
+        
+        # 6. Auto contrast / equalize histogram
+        try:
+            image = ImageOps.equalize(image)
+            print(f"[OCR] Equalized histogram")
+        except:
+            pass
+        
+        # 7. Binarize (convert to black and white) - helps with text clarity
+        threshold = 128
+        image = image.point(lambda p: p > threshold and 255)
+        print(f"[OCR] Binarized with threshold: {threshold}")
+        
+        # ========== Try Multiple OCR Configs ==========
         
         configs = [
-            '--psm 6 --oem 3',
-            '--psm 4 --oem 3',
-            '--psm 12 --oem 3',
+            '--psm 6 --oem 3',      # Block of text, default OCR
+            '--psm 4 --oem 3',      # Single column of text
+            '--psm 11 --oem 3',     # Sparse text
+            '--psm 12 --oem 3',     # Sparse text with OSD
+            '--psm 3 --oem 3',      # Fully automatic page segmentation
+            '-l eng --psm 6 --oem 3', # English language
         ]
         
         best_text = ''
+        best_length = 0
+        
         for config in configs:
             try:
+                print(f"[OCR] Trying config: {config}")
                 text = pytesseract.image_to_string(image, config=config)
-                if len(text.strip()) > len(best_text):
-                    best_text = text
-            except:
+                cleaned = text.strip()
+                if cleaned:
+                    length = len(cleaned)
+                    if length > best_length:
+                        best_length = length
+                        best_text = cleaned
+                        print(f"[OCR] Found {length} characters with config: {config}")
+            except Exception as e:
+                print(f"[OCR] Config {config} failed: {e}")
                 continue
         
-        return best_text.strip()
+        # If no text found with any config, try a more aggressive approach
+        if not best_text:
+            print("[OCR] No text found with standard configs. Trying with white background...")
+            try:
+                inverted = ImageOps.invert(image)
+                text = pytesseract.image_to_string(inverted, config='--psm 6 --oem 3')
+                if text.strip():
+                    best_text = text.strip()
+                    print(f"[OCR] Found text with inverted image: {len(best_text)} characters")
+            except Exception as e:
+                print(f"[OCR] Invert attempt failed: {e}")
+        
+        if best_text:
+            print(f"[OCR] Total extracted text: {len(best_text)} characters")
+            print(f"[OCR] Preview: {best_text[:200]}...")
+            return best_text
+        else:
+            print("[OCR] No text extracted from image")
+            return ''
         
     except Exception as e:
         print(f"[OCR Error] {e}")
+        import traceback
+        traceback.print_exc()
         return ''
 
 @app.route('/api/analyze-slip', methods=['POST'])
@@ -366,9 +493,10 @@ def analyze_betslip():
         # Try OCR if image uploaded
         ocr_text = ''
         if uploaded_file:
+            print("[OCR] Processing uploaded image...")
             ocr_text = _extract_text_from_image(uploaded_file)
             if ocr_text:
-                print(f"[OCR] Extracted text: {ocr_text[:200]}...")
+                print(f"[OCR] Successfully extracted text: {ocr_text[:200]}...")
             else:
                 print("[OCR] No text extracted from image")
         
@@ -460,18 +588,24 @@ def debug_status():
     """Debug endpoint"""
     import sys
     
+    # Check OCR status
+    ocr_available = _ocr_available()
+    
     return jsonify({
         'api_available': API_AVAILABLE,
         'api_import_error': API_IMPORT_ERROR,
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
+        'ocr_available': ocr_available,
+        'tesseract_path': _get_tesseract_command(),
         'environment': {
             'RENDER': os.environ.get('RENDER'),
             'LIVE_FEEDS_ENABLED': os.environ.get('LIVE_FEEDS_ENABLED'),
             'ODDS_API_IO_KEY': '***' if os.environ.get('ODDS_API_IO_KEY') else 'Not Set',
+            'TESSERACT_CMD': os.environ.get('TESSERACT_CMD', 'Not Set'),
         },
         'python_version': sys.version,
         'timestamp': datetime.now(timezone.utc).isoformat(),
-        'note': 'Multi-source integration with match dates and multiple competitions'
+        'note': 'Multi-source integration with OCR support'
     })
 
 @app.route('/health')
