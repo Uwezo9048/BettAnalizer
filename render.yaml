@@ -1,14 +1,10 @@
 services:
   - type: web
     name: bett-analizer
-    runtime: python
-    buildCommand: |
-      chmod +x build.sh
-      ./build.sh
-    startCommand: gunicorn app:app
+    runtime: docker
+    repo: https://github.com/Uwezo9048/BettAnalizer
+    dockerfilePath: ./Dockerfile
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.4
       - key: ODDS_API_IO_KEY
         sync: false
       - key: LIVE_FEEDS_ENABLED
