@@ -1,9 +1,8 @@
 """
 Live Odds Fetcher for Supported Betting Sites
-Uses Odds-API.io as primary source with SportyBet fallback
+Uses SportyBet as primary source (works on Render) with The Odds API fallback
 """
 
-import json
 import os
 import time
 from datetime import datetime
@@ -19,7 +18,7 @@ LIVE_FEEDS_ENABLED = os.environ.get("RENDER") == "true" or _live_feeds_setting i
 # Disable OddsAfrica-API
 API_AVAILABLE = False
 API_INSTANCES = {}
-API_IMPORT_ERROR = "OddsAfrica-API disabled - using Odds-API.io + SportyBet"
+API_IMPORT_ERROR = "OddsAfrica-API disabled - using SportyBet + The Odds API"
 
 # Supported betting sites
 SUPPORTED_LIVE_SITES = {
@@ -85,11 +84,11 @@ SPORTYBET_SPORT_IDS = {
     "darts": "sr:sport:22",
 }
 
-print("ℹ️  Running with Odds-API.io + SportyBet")
+print("ℹ️  Running with SportyBet + The Odds API")
 
 
 class LiveOddsFetcher:
-    """Fetches live odds from Odds-API.io and SportyBet"""
+    """Fetches live odds from SportyBet and The Odds API"""
     
     def __init__(self):
         self.cache = {}
@@ -97,7 +96,24 @@ class LiveOddsFetcher:
         self.live_fetch_timeout = 10
         self._odds_api_io = None
         
-    
+    def _get_odds_api_io(self):
+        """Lazy load The Odds API client"""
+        if self._odds_api_io is None:
+            try:
+                from odds_api_io import OddsAPIIO
+                self._odds_api_io = OddsAPIIO()
+                if self._odds_api_io and self._odds_api_io.client:
+                    print("[DEBUG] The Odds API client initialized")
+                else:
+                    print("[DEBUG] The Odds API client not available - check API key")
+                    self._odds_api_io = False
+            except ImportError as e:
+                print(f"[DEBUG] odds_api_io module not available: {e}")
+                self._odds_api_io = False
+            except Exception as e:
+                print(f"[DEBUG] Error initializing The Odds API: {e}")
+                self._odds_api_io = False
+        return self._odds_api_io
     
     def get_supported_sites(self):
         """Return list of sites with live feed capability"""
@@ -129,7 +145,8 @@ class LiveOddsFetcher:
     
     def fetch_live_odds(self, site_id, sport="football"):
         """
-        Fetch live odds - tries Odds-API.io first, then SportyBet
+        Fetch live odds - tries SportyBet first (works better on Render)
+        Then falls back to The Odds API
         
         Args:
             site_id: Site identifier (sportybet, bet9ja, etc.)
@@ -150,26 +167,7 @@ class LiveOddsFetcher:
 
         print(f"[DEBUG] Fetching odds for {site_id} - {sport}")
         
-        # TRY 1: Odds-API.io (REAL ODDS - Primary)
-        try:
-            print("[DEBUG] Trying Odds-API.io...")
-            api = self._get_odds_api_io()
-            if api and api.client:
-                matches = api.get_live_events(sport, limit=30)
-                if matches and len(matches) > 0:
-                    print(f"[DEBUG] ✅ Found {len(matches)} REAL matches from Odds-API.io")
-                    # Remove sample flag if present
-                    for match in matches:
-                        match['sample'] = False
-                        match['from_api'] = True
-                    self.cache[cache_key] = (time.time(), matches)
-                    return matches
-                else:
-                    print("[DEBUG] Odds-API.io returned no matches")
-        except Exception as e:
-            print(f"[DEBUG] Odds-API.io failed: {e}")
-        
-        # TRY 2: SportyBet direct API (for African bookmaker odds)
+        # TRY 1: SportyBet direct API (Primary - Works on Render)
         try:
             print("[DEBUG] Trying SportyBet direct API...")
             matches = self._fetch_sportybet_direct(sport)
@@ -177,35 +175,32 @@ class LiveOddsFetcher:
                 print(f"[DEBUG] ✅ Found {len(matches)} REAL matches from SportyBet")
                 self.cache[cache_key] = (time.time(), matches)
                 return matches
+            else:
+                print("[DEBUG] SportyBet returned no real matches")
         except Exception as e:
             print(f"[DEBUG] SportyBet direct API failed: {e}")
         
-        # No real matches found - return empty list
-        print(f"[DEBUG] ❌ No real matches found for {site_id}")
-        return []
-
-    def fetch_value_bets(self, bookmaker: str = None, limit: int = 20):
-        """Fetch value bet recommendations from Odds-API.io"""
+        # TRY 2: The Odds API (Fallback)
         try:
+            print("[DEBUG] Trying The Odds API...")
             api = self._get_odds_api_io()
             if api and api.client:
-                return api.get_value_bets(bookmaker, limit)
+                matches = api.get_live_events(sport, limit=30)
+                if matches and len(matches) > 0:
+                    print(f"[DEBUG] ✅ Found {len(matches)} matches from The Odds API")
+                    self.cache[cache_key] = (time.time(), matches)
+                    return matches
+                else:
+                    print("[DEBUG] The Odds API returned no matches")
         except Exception as e:
-            print(f"[DEBUG] Error fetching value bets: {e}")
-        return []
-
-    def fetch_arbitrage_opportunities(self, bookmakers: str = "bet365,pinnacle", limit: int = 10):
-        """Fetch arbitrage opportunities from Odds-API.io"""
-        try:
-            api = self._get_odds_api_io()
-            if api and api.client:
-                return api.get_arbitrage_opportunities(bookmakers, limit)
-        except Exception as e:
-            print(f"[DEBUG] Error fetching arbitrage opportunities: {e}")
+            print(f"[DEBUG] The Odds API failed: {e}")
+        
+        # No matches found
+        print(f"[DEBUG] ❌ No matches found for {site_id}")
         return []
 
     def _fetch_sportybet_direct(self, sport):
-        """Fetch SportyBet Kenya events directly"""
+        """Fetch SportyBet Kenya events directly - Updated endpoints"""
         sport_id = SPORTYBET_SPORT_IDS.get(sport)
         if not sport_id:
             return []
@@ -219,6 +214,7 @@ class LiveOddsFetcher:
             "Operid": "1",
         }
         
+        # Try different SportyBet API endpoints
         endpoints = [
             "https://www.sportybet.com/api/ke/factsCenter/liveOrPrematchEvents",
             "https://www.sportybet.com/api/ke/factsCenter/importantEvents",
@@ -233,6 +229,7 @@ class LiveOddsFetcher:
 
         for endpoint in endpoints:
             try:
+                print(f"[DEBUG] Trying SportyBet endpoint: {endpoint}")
                 response = requests.get(
                     endpoint, 
                     headers=headers, 
@@ -243,18 +240,19 @@ class LiveOddsFetcher:
                 payload = response.json()
                 
                 if payload.get("bizCode") != 10000:
+                    print(f"[DEBUG] SportyBet API returned bizCode: {payload.get('bizCode')}")
                     continue
 
                 for tournament in payload.get("data") or []:
                     tournament_name = tournament.get("name") or ""
                     
-                    # Skip simulated leagues
+                    # Skip SRL leagues
                     if any(keyword in tournament_name.lower() 
                            for keyword in ["srl", "simulated", "virtual"]):
                         continue
                     
                     for event in tournament.get("events") or []:
-                        # Skip simulated events
+                        # Skip SRL events
                         if "SRL" in event.get("homeTeamName", "") or "SRL" in event.get("awayTeamName", ""):
                             continue
                         
