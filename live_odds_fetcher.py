@@ -142,8 +142,9 @@ class LiveOddsFetcher:
     def __init__(self):
         self.cache = {}
         self.cache_duration = 30  # seconds
-        self.live_fetch_timeout = 8  # seconds
-    
+        # Increase timeout for Render's slower environment
+        self.live_fetch_timeout = 15 if os.environ.get("RENDER") else 8  # seconds
+        
     def get_supported_sites(self):
         """Return list of sites with live feed capability"""
         sites = []
@@ -194,16 +195,38 @@ class LiveOddsFetcher:
         if sport not in SUPPORTED_SPORTS or not SUPPORTED_SPORTS[sport].get("live_feed"):
             return []
 
+        # ADD DEBUG LOGGING
+        print(f"[DEBUG] LIVE_FEEDS_ENABLED: {LIVE_FEEDS_ENABLED}")
+        print(f"[DEBUG] API_AVAILABLE: {API_AVAILABLE}")
+        print(f"[DEBUG] site_id in API_INSTANCES: {site_id in API_INSTANCES}")
+        print(f"[DEBUG] RENDER env: {os.environ.get('RENDER')}")
+        
         if not LIVE_FEEDS_ENABLED or not API_AVAILABLE or site_id not in API_INSTANCES:
+            print(f"[DEBUG] Falling back to stored/sample data for {site_id}")
             return self._get_fallback_data(site_id, sport)
         
         try:
             if site_id == "sportybet":
                 current_matches = self._fetch_current_sportybet_odds(sport)
                 if current_matches:
-                    self.cache[cache_key] = (time.time(), current_matches)
-                    return current_matches
+                    # Check if they're real or SRL
+                    if self._is_sample_data(current_matches):
+                        print("[WARNING] Matches contain SRL - these are sample/test data!")
+                        # Try alternative method using OddsAfrica-API
+                        api_instance = API_INSTANCES[site_id]
+                        raw_data = self._run_with_timeout(api_instance.Get_games, sport)
+                        if raw_data:
+                            matches = self._parse_api_response(raw_data, site_id)
+                            if matches and not self._is_sample_data(matches):
+                                print(f"[DEBUG] Found {len(matches)} real matches from API")
+                                self.cache[cache_key] = (time.time(), matches)
+                                return matches
+                    else:
+                        print(f"[DEBUG] Found {len(current_matches)} real SportyBet matches")
+                        self.cache[cache_key] = (time.time(), current_matches)
+                        return current_matches
 
+            # Try OddsAfrica-API for other sites or as fallback
             api_instance = API_INSTANCES[site_id]
             raw_data = self._run_with_timeout(api_instance.Get_games, sport)
             
@@ -222,7 +245,6 @@ class LiveOddsFetcher:
             
             # Cache results
             self.cache[cache_key] = (time.time(), matches)
-            
             return matches
             
         except Exception as e:
@@ -233,43 +255,80 @@ class LiveOddsFetcher:
             return fallback_data
 
     def _fetch_current_sportybet_odds(self, sport):
-        """Fetch SportyBet Kenya events from the current public factsCenter API."""
+        """Fetch SportyBet Kenya events - FIXED for real matches"""
         sport_id = SPORTYBET_CURRENT_SPORT_IDS.get(sport)
         if not sport_id:
             return []
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json, text/plain, */*",
             "Referer": f"https://www.sportybet.com/ke/sport/{sport}/",
             "Clientid": "web",
             "Platform": "web",
             "Operid": "1",
+            "Origin": "https://www.sportybet.com",
+            "Sec-Fetch-Site": "same-origin",
         }
+        
+        # Use the correct endpoint for live matches
         endpoints = [
+            "https://www.sportybet.com/api/ke/factsCenter/liveEvents",
             "https://www.sportybet.com/api/ke/factsCenter/liveOrPrematchEvents",
-            "https://www.sportybet.com/api/ke/factsCenter/importantEvents",
         ]
-        params = {"sportId": sport_id, "productId": 3}
+        
+        params = {
+            "sportId": sport_id, 
+            "productId": 3,
+            "isLive": "true",
+            "marketType": "1X2,Over/Under,GG/NG"
+        }
+        
         events_by_id = {}
 
         for endpoint in endpoints:
-            response = requests.get(endpoint, headers=headers, params=params, timeout=self.live_fetch_timeout)
-            response.raise_for_status()
-            payload = response.json()
-            if payload.get("bizCode") != 10000:
+            try:
+                response = requests.get(
+                    endpoint, 
+                    headers=headers, 
+                    params=params, 
+                    timeout=self.live_fetch_timeout
+                )
+                response.raise_for_status()
+                payload = response.json()
+                
+                if payload.get("bizCode") != 10000:
+                    print(f"[DEBUG] SportyBet API error: {payload.get('message')}")
+                    continue
+
+                # Process tournaments and events
+                for tournament in payload.get("data") or []:
+                    tournament_name = tournament.get("name") or ""
+                    category_name = tournament.get("categoryName") or ""
+                    
+                    # Skip SRL leagues
+                    if any(keyword in tournament_name.lower() or keyword in category_name.lower() 
+                           for keyword in ["srl", "simulated", "virtual"]):
+                        print(f"[DEBUG] Skipping SRL: {tournament_name}")
+                        continue
+                    
+                    for event in tournament.get("events") or []:
+                        # Skip SRL events
+                        if "SRL" in event.get("homeTeamName", "") or "SRL" in event.get("awayTeamName", ""):
+                            continue
+                        
+                        parsed = self._parse_current_sportybet_event(event, tournament_name, category_name)
+                        if parsed:
+                            events_by_id[parsed["id"]] = parsed
+                            print(f"[DEBUG] Added real match: {parsed['home_team']} vs {parsed['away_team']}")
+                            
+            except Exception as e:
+                print(f"[DEBUG] Error fetching from {endpoint}: {e}")
                 continue
 
-            for tournament in payload.get("data") or []:
-                tournament_name = tournament.get("name") or "SportyBet"
-                category_name = tournament.get("categoryName") or ""
-                for event in tournament.get("events") or []:
-                    parsed = self._parse_current_sportybet_event(event, tournament_name, category_name)
-                    if parsed:
-                        events_by_id[parsed["id"]] = parsed
-
-        return list(events_by_id.values())[:50]
+        matches = list(events_by_id.values())
+        print(f"[DEBUG] Total real matches found: {len(matches)}")
+        return matches[:50]
 
     def _parse_current_sportybet_event(self, event, tournament_name, category_name):
         structured_markets = {}
@@ -459,6 +518,22 @@ class LiveOddsFetcher:
             return len(self._get_stored_matches(site_id, sport))
         except Exception:
             return 0
+
+    def _is_sample_data(self, matches):
+        """Check if matches are sample/SRL data"""
+        if not matches:
+            return True
+        
+        for match in matches[:3]:
+            league = match.get('league', '').lower()
+            home = match.get('home_team', '').lower()
+            away = match.get('away_team', '').lower()
+            
+            if any(keyword in league or keyword in home or keyword in away 
+                   for keyword in ['srl', 'simulated', 'virtual', 'sample']):
+                return True
+        
+        return False
 
     def _get_fallback_data(self, site_id, sport):
         if sport == "football":

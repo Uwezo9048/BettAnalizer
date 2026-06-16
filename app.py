@@ -287,6 +287,111 @@ def api_status():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/api/debug-status')
+def debug_status():
+    """Debug endpoint to check what's happening on Render"""
+    import sys
+    
+    # Check if OddsAfrica-API is installed
+    api_installed = False
+    api_path = None
+    api_error = None
+    try:
+        import engine.bookie_models.sportybet_model
+        api_installed = True
+        api_path = engine.bookie_models.sportybet_model.__file__
+    except ImportError as e:
+        api_error = str(e)
+    
+    # Check environment
+    env_vars = {
+        'RENDER': os.environ.get('RENDER'),
+        'LIVE_FEEDS_ENABLED': os.environ.get('LIVE_FEEDS_ENABLED'),
+        'PYTHONPATH': os.environ.get('PYTHONPATH'),
+        'PATH': os.environ.get('PATH')[:200] + '...' if os.environ.get('PATH') else None
+    }
+    
+    return jsonify({
+        'api_available': API_AVAILABLE,
+        'api_import_error': API_IMPORT_ERROR,
+        'live_feeds_enabled': LIVE_FEEDS_ENABLED,
+        'api_installed': api_installed,
+        'api_path': api_path,
+        'api_error': api_error,
+        'environment': env_vars,
+        'python_version': sys.version,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/test-sportybet')
+def test_sportybet():
+    """Test SportyBet API directly"""
+    try:
+        import requests
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Clientid": "web",
+            "Platform": "web",
+            "Operid": "1",
+        }
+        
+        # Test the API endpoint
+        response = requests.get(
+            "https://www.sportybet.com/api/ke/factsCenter/liveOrPrematchEvents",
+            headers=headers,
+            params={"sportId": "sr:sport:1", "productId": 3},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Check if we got real data
+            has_real_matches = False
+            sample_count = 0
+            tournament_names = []
+            
+            for tournament in data.get("data", []):
+                tournament_name = tournament.get("name", "")
+                tournament_names.append(tournament_name)
+                if "SRL" in tournament_name or "simulated" in tournament_name.lower():
+                    sample_count += len(tournament.get("events", []))
+                else:
+                    has_real_matches = True
+            
+            return jsonify({
+                'status': 'success',
+                'has_real_matches': has_real_matches,
+                'sample_matches_count': sample_count,
+                'total_tournaments': len(data.get("data", [])),
+                'tournament_names': tournament_names[:10],
+                'full_response_size': len(str(data))
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'status_code': response.status_code,
+                'message': response.text[:200]
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+@app.route('/health')
+def health():
+    """Health check endpoint for Render"""
+    return jsonify({
+        'status': 'healthy',
+        'api_available': API_AVAILABLE,
+        'live_feeds_enabled': LIVE_FEEDS_ENABLED,
+        'timestamp': datetime.now().isoformat()
+    }), 200
+
+# ========== Helper Functions ==========
+
 def _ocr_available():
     try:
         import pytesseract
