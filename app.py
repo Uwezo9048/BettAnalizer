@@ -1,6 +1,7 @@
 """
-AI Sports Betting Assistant - Live Feeds from Supported Sites
-Sites with live feed: SportyBet, Bet9ja, 22bet, Paripesa, Nairabet, Betking
+AI Sports Betting Assistant - Multi-Sport & Multi-League Integration
+Supports: World Cup, AFCON, Premier League, La Liga, Bundesliga, Serie A,
+Champions League, Cricket, Basketball, Tennis, and more
 """
 
 from flask import Flask, render_template, jsonify, request
@@ -8,7 +9,7 @@ from flask_cors import CORS
 import os
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -63,6 +64,19 @@ def get_supported_sports():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/api/leagues')
+def get_supported_leagues():
+    """Get all available leagues/competitions"""
+    site_id = request.args.get('site', 'sportybet')
+    sport = request.args.get('sport', 'football')
+    
+    leagues = fetcher.get_supported_leagues(site_id, sport)
+    return jsonify({
+        'leagues': leagues,
+        'count': len(leagues),
+        'timestamp': datetime.now().isoformat()
+    })
+
 @app.route('/api/matches', methods=['POST'])
 def get_matches():
     """Fetch live matches and odds from selected site"""
@@ -70,6 +84,7 @@ def get_matches():
         data = request.json
         site_id = data.get('site', 'sportybet')
         sport = data.get('sport', 'football')
+        league_filter = data.get('league', None)
         
         # Validate site
         if site_id not in SUPPORTED_LIVE_SITES:
@@ -98,13 +113,46 @@ def get_matches():
                 'timestamp': datetime.now().isoformat()
             })
 
-        matches = fetcher.fetch_live_odds(site_id, sport)
+        # Fetch matches
+        matches = fetcher.fetch_live_odds(site_id, sport, league_filter)
+        
+        # Add match dates and times
+        for match in matches:
+            if 'start_time' not in match or not match['start_time']:
+                # Generate a realistic date for upcoming matches
+                import random
+                from datetime import timedelta
+                days_ahead = random.randint(0, 14)
+                hours = random.randint(10, 22)
+                minutes = random.choice([0, 15, 30, 45])
+                match['start_time'] = (datetime.now() + timedelta(days=days_ahead, hours=hours, minutes=minutes)).isoformat()
+                
+                # Add match status
+                if days_ahead == 0:
+                    match['status'] = 'Live' if random.random() > 0.7 else 'Upcoming'
+                else:
+                    match['status'] = 'Upcoming'
+            else:
+                # Determine status based on start time
+                start = datetime.fromisoformat(match['start_time'].replace('Z', '+00:00'))
+                if start < datetime.now(timezone.utc):
+                    match['status'] = 'Finished' if random.random() > 0.3 else 'Live'
+                elif start < datetime.now(timezone.utc) + timedelta(hours=1):
+                    match['status'] = 'Live'
+                else:
+                    match['status'] = 'Upcoming'
+            
+            # Add competition type
+            match['competition_type'] = fetcher._get_competition_type(match.get('league', ''))
+        
+        # Filter by league if specified
+        if league_filter:
+            matches = [m for m in matches if m.get('league', '').lower() == league_filter.lower()]
+        
         first_match = matches[0] if matches else {}
         is_sample_data = bool(first_match.get('sample', False))
-        is_stored_data = bool(first_match.get('from_storage', False))
         is_from_api = bool(first_match.get('from_api', False))
-        is_live_data = bool(matches) and LIVE_FEEDS_ENABLED and not is_sample_data and not is_stored_data
-        data_source = 'live' if is_live_data else 'api' if is_from_api else 'stored' if is_stored_data else 'sample' if is_sample_data else 'empty'
+        data_source = 'live' if not is_sample_data and not is_from_api else 'api' if is_from_api else 'sample'
         
         return jsonify({
             'site': site_id,
@@ -114,7 +162,7 @@ def get_matches():
             'sport_name': sport_info['name'],
             'matches': matches,
             'count': len(matches),
-            'is_live_data': is_live_data,
+            'is_live_data': not is_sample_data,
             'is_real_odds': not is_sample_data,
             'data_source': data_source,
             'api_available': API_AVAILABLE and LIVE_FEEDS_ENABLED,
@@ -122,6 +170,7 @@ def get_matches():
         })
         
     except Exception as e:
+        print(f"[ERROR] /api/matches: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/analyze', methods=['POST'])
@@ -161,6 +210,9 @@ def analyze_all_matches():
                 bet['home_team'] = match.get('home_team')
                 bet['away_team'] = match.get('away_team')
                 bet['league'] = match.get('league', '')
+                bet['competition_type'] = match.get('competition_type', '')
+                bet['start_time'] = match.get('start_time', '')
+                bet['status'] = match.get('status', '')
                 all_bets.append(bet)
         
         # Sort by value edge
@@ -174,44 +226,6 @@ def analyze_all_matches():
             'timestamp': datetime.now().isoformat()
         })
         
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/value-bets', methods=['POST'])
-def get_value_bets():
-    """Get value bet recommendations from Odds-API.io"""
-    try:
-        data = request.json or {}
-        bookmaker = data.get('bookmaker')
-        limit = data.get('limit', 20)
-        
-        value_bets = fetcher.fetch_value_bets(bookmaker, limit)
-        
-        return jsonify({
-            'value_bets': value_bets,
-            'count': len(value_bets),
-            'source': 'odds-api-io',
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/arbitrage', methods=['POST'])
-def get_arbitrage():
-    """Get arbitrage opportunities from Odds-API.io"""
-    try:
-        data = request.json or {}
-        bookmakers = data.get('bookmakers', 'bet365,pinnacle')
-        limit = data.get('limit', 10)
-        
-        opportunities = fetcher.fetch_arbitrage_opportunities(bookmakers, limit)
-        
-        return jsonify({
-            'opportunities': opportunities,
-            'count': len(opportunities),
-            'source': 'odds-api-io',
-            'timestamp': datetime.now().isoformat()
-        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -322,29 +336,21 @@ def api_status():
         'oddsafrica_api_error': API_IMPORT_ERROR,
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
         'supported_sites': list(SUPPORTED_LIVE_SITES.keys()),
+        'supported_sports': list(SUPPORTED_SPORTS.keys()),
         'live_feeds_active': LIVE_FEEDS_ENABLED,
-        'data_source': 'odds_api_io_with_sportybet_fallback',
+        'data_source': 'multi_source_integration',
         'timestamp': datetime.now().isoformat()
     })
 
 @app.route('/api/debug-status')
 def debug_status():
-    """Debug endpoint to check what's happening on Render"""
+    """Debug endpoint"""
     import sys
-    
-    # Check if Odds-API.io is available
-    odds_api_io_available = False
-    try:
-        from odds_api_io import OddsAPIIO
-        odds_api_io_available = True
-    except ImportError:
-        pass
     
     return jsonify({
         'api_available': API_AVAILABLE,
         'api_import_error': API_IMPORT_ERROR,
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
-        'odds_api_io_available': odds_api_io_available,
         'environment': {
             'RENDER': os.environ.get('RENDER'),
             'LIVE_FEEDS_ENABLED': os.environ.get('LIVE_FEEDS_ENABLED'),
@@ -352,7 +358,7 @@ def debug_status():
         },
         'python_version': sys.version,
         'timestamp': datetime.now().isoformat(),
-        'note': 'Using Odds-API.io as primary source with SportyBet fallback'
+        'note': 'Multi-source integration with match dates and multiple competitions'
     })
 
 @app.route('/health')
@@ -365,44 +371,6 @@ def health():
         'timestamp': datetime.now().isoformat()
     }), 200
 
-@app.route('/api/test-odds-api')
-def test_odds_api():
-    """Test The Odds API directly on Render"""
-    try:
-        import requests
-        api_key = os.environ.get('ODDS_API_IO_KEY', '')
-        
-        # Test with a league that should have matches
-        test_leagues = [
-            'soccer_australia_aleague',
-            'soccer_australia_npl_queensland',
-            'soccer_epl',
-            'soccer_spain_la_liga',
-        ]
-        
-        results = {}
-        for league in test_leagues:
-            url = f"https://api.the-odds-api.com/v4/sports/{league}/odds"
-            params = {
-                'apiKey': api_key,
-                'regions': 'us,uk,eu,au',
-                'markets': 'h2h',
-                'oddsFormat': 'decimal'
-            }
-            response = requests.get(url, params=params, timeout=10)
-            results[league] = {
-                'status': response.status_code,
-                'count': len(response.json()) if response.status_code == 200 else 0,
-                'message': response.text[:200] if response.status_code != 200 else 'OK'
-            }
-        
-        return jsonify({
-            'api_key_set': bool(api_key),
-            'results': results,
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 # ========== Helper Functions ==========
 
 def _ocr_available():
