@@ -118,7 +118,74 @@
             <!-- Dynamically populated -->
         </div>
 
-        <!-- Manual Entry -->
+        <!-- ============================================ -->
+        <!-- BETSLIP ANALYZER - COMPLETE SECTION -->
+        <!-- ============================================ -->
+        <div class="manual-entry" style="border-color: #7b2ffc; border-width: 2px;">
+            <div class="title" style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 24px;">📋</span>
+                Betslip Analyzer
+                <span style="font-size: 12px; background: #7b2ffc; color: #fff; padding: 2px 12px; border-radius: 20px; font-weight: 400;">AI-Powered</span>
+            </div>
+            <p style="color: #6a8aaa; font-size: 13px; margin-bottom: 12px;">
+                Paste your betslip text or upload a screenshot to analyze risk, find value, and get AI recommendations
+            </p>
+
+            <!-- Tab Navigation -->
+            <div style="display: flex; gap: 4px; margin-bottom: 16px; background: #141b2b; border-radius: 8px; padding: 4px;">
+                <button class="btn btn-primary slip-tab active" data-tab="text" style="flex: 1; font-size: 13px; padding: 8px;">📝 Text Input</button>
+                <button class="btn btn-secondary slip-tab" data-tab="image" style="flex: 1; font-size: 13px; padding: 8px;">🖼️ Upload Image</button>
+            </div>
+
+            <!-- Text Input Tab -->
+            <div id="slip-text-tab" class="slip-tab-content">
+                <div class="form-row" style="grid-template-columns: 1fr;">
+                    <textarea id="slip-input" rows="6" placeholder="Paste your betslip here...&#10;&#10;Example format:&#10;Liverpool vs Arsenal - Home @ 2.10&#10;Real Madrid vs Barcelona - Draw @ 3.40&#10;Bayern Munich vs Dortmund - Over 2.5 @ 1.85" style="width: 100%; padding: 12px; background: #141b2b; border: 1px solid #2a3a5a; border-radius: 8px; color: #e8edf5; font-size: 14px; resize: vertical; font-family: inherit;"></textarea>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" id="slip-analyze-btn" style="flex: 1;">🔍 Analyze Betslip</button>
+                    <button class="btn btn-secondary" id="slip-clear-btn">🗑️ Clear</button>
+                </div>
+                <div style="margin-top: 8px; font-size: 12px; color: #4a6a8a;">
+                    💡 Supports formats: "Team A vs Team B - Selection @ odds" or "Team A vs Team B | Selection | odds"
+                </div>
+            </div>
+
+            <!-- Image Upload Tab -->
+            <div id="slip-image-tab" class="slip-tab-content" style="display: none;">
+                <div style="border: 2px dashed #2a3a5a; border-radius: 12px; padding: 30px; text-align: center; cursor: pointer; transition: all 0.3s; background: #0a0e17;" id="drop-zone">
+                    <div style="font-size: 48px; margin-bottom: 12px;">📸</div>
+                    <div style="font-size: 16px; color: #e8edf5; font-weight: 500;">Drop your betslip image here</div>
+                    <div style="font-size: 13px; color: #6a8aaa; margin-top: 4px;">or click to browse</div>
+                    <div style="font-size: 12px; color: #4a6a8a; margin-top: 8px;">Supports: PNG, JPG, JPEG, WEBP</div>
+                    <input type="file" id="slip-image-input" accept="image/*" style="display: none;" />
+                </div>
+                <div style="margin-top: 12px; display: none;" id="image-preview-container">
+                    <div style="display: flex; gap: 12px; align-items: center; background: #141b2b; padding: 12px; border-radius: 8px;">
+                        <img id="image-preview" src="#" alt="Preview" style="max-height: 80px; border-radius: 4px;" />
+                        <div style="flex: 1;">
+                            <div id="image-filename" style="color: #e8edf5; font-size: 14px;">image.png</div>
+                            <div style="display: flex; gap: 8px; margin-top: 4px;">
+                                <button class="btn btn-primary" id="slip-image-analyze-btn" style="padding: 6px 16px; font-size: 13px;">🔍 Analyze Image</button>
+                                <button class="btn btn-secondary" id="slip-image-remove-btn" style="padding: 6px 16px; font-size: 13px;">✖ Remove</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div style="margin-top: 8px; font-size: 12px; color: #4a6a8a;">
+                    📌 The AI will read the text from your image using OCR
+                </div>
+            </div>
+
+            <!-- Betslip Results -->
+            <div class="analysis-results" id="slip-results" style="margin-top: 16px;">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- MANUAL ENTRY SECTION -->
+        <!-- ============================================ -->
         <div class="manual-entry">
             <div class="title">📝 Manual Entry</div>
             <p style="color: #6a8aaa; font-size: 13px; margin-bottom: 12px;">
@@ -141,19 +208,6 @@
             </div>
             <button class="btn btn-primary" id="manual-predict-btn">🧠 AI Predict</button>
             <div class="analysis-results" id="manual-results" style="margin-top: 12px;"></div>
-        </div>
-
-        <!-- Betslip Analyzer -->
-        <div class="manual-entry">
-            <div class="title">📋 Betslip Analyzer</div>
-            <p style="color: #6a8aaa; font-size: 13px; margin-bottom: 12px;">
-                Paste your betslip text or upload a screenshot to analyze risk and find better combinations
-            </p>
-            <div class="form-row">
-                <textarea id="slip-input" rows="4" placeholder="Paste your betslip here...&#10;Example:&#10;Liverpool vs Arsenal - Home @ 2.10&#10;Real Madrid vs Barcelona - Draw @ 3.40" style="width: 100%; padding: 12px; background: #141b2b; border: 1px solid #2a3a5a; border-radius: 8px; color: #e8edf5; font-size: 14px; resize: vertical;"></textarea>
-            </div>
-            <button class="btn btn-primary" id="slip-analyze-btn">🔍 Analyze Betslip</button>
-            <div class="analysis-results" id="slip-results" style="margin-top: 12px;"></div>
         </div>
 
         <!-- Toast Notification -->

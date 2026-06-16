@@ -911,3 +911,273 @@ async function init() {
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', init);
+
+// ============================================
+// Betslip Image Upload & OCR
+// ============================================
+
+// Tab switching
+document.querySelectorAll('.slip-tab').forEach(tab => {
+    tab.addEventListener('click', function() {
+        // Update tabs
+        document.querySelectorAll('.slip-tab').forEach(t => t.classList.remove('active'));
+        this.classList.add('active');
+        this.classList.remove('btn-secondary');
+        this.classList.add('btn-primary');
+        document.querySelectorAll('.slip-tab').forEach(t => {
+            if (!t.classList.contains('active')) {
+                t.classList.remove('btn-primary');
+                t.classList.add('btn-secondary');
+            }
+        });
+        
+        // Show/hide content
+        const tabName = this.dataset.tab;
+        document.querySelectorAll('.slip-tab-content').forEach(content => {
+            content.style.display = 'none';
+        });
+        document.getElementById(`slip-${tabName}-tab`).style.display = 'block';
+    });
+});
+
+// Drop zone functionality
+const dropZone = document.getElementById('drop-zone');
+const imageInput = document.getElementById('slip-image-input');
+const previewContainer = document.getElementById('image-preview-container');
+const imagePreview = document.getElementById('image-preview');
+const imageFilename = document.getElementById('image-filename');
+
+let uploadedFile = null;
+
+// Click to browse
+dropZone.addEventListener('click', () => {
+    imageInput.click();
+});
+
+// File selection
+imageInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+    }
+});
+
+// Drag and drop
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = '#7b2ffc';
+    dropZone.style.background = '#141b2b';
+});
+
+dropZone.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = '#2a3a5a';
+    dropZone.style.background = '#0a0e17';
+});
+
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = '#2a3a5a';
+    dropZone.style.background = '#0a0e17';
+    
+    if (e.dataTransfer.files.length > 0) {
+        handleFile(e.dataTransfer.files[0]);
+    }
+});
+
+function handleFile(file) {
+    if (!file.type.startsWith('image/')) {
+        showToast('Please upload an image file', 'error', 'Invalid File');
+        return;
+    }
+    
+    uploadedFile = file;
+    
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        imagePreview.src = e.target.result;
+        imageFilename.textContent = file.name;
+        previewContainer.style.display = 'block';
+        dropZone.style.display = 'none';
+        showToast('Image uploaded successfully!', 'success', 'Upload Complete');
+    };
+    reader.readAsDataURL(file);
+}
+
+// Remove image
+document.getElementById('slip-image-remove-btn')?.addEventListener('click', () => {
+    uploadedFile = null;
+    previewContainer.style.display = 'none';
+    dropZone.style.display = 'block';
+    imageInput.value = '';
+    document.getElementById('slip-image-results')?.classList.remove('visible');
+});
+
+// Analyze image (OCR)
+document.getElementById('slip-image-analyze-btn')?.addEventListener('click', async () => {
+    if (!uploadedFile) {
+        showToast('Please upload an image first', 'error', 'No Image');
+        return;
+    }
+    
+    try {
+        setLoading(true);
+        
+        // Create form data for image upload
+        const formData = new FormData();
+        formData.append('screenshot', uploadedFile);
+        
+        const response = await fetch('/api/analyze-slip', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'OCR analysis failed');
+        }
+        
+        const result = await response.json();
+        displaySlipResults(result);
+        
+        if (result.ocr_text) {
+            // Also populate the text area with OCR text
+            document.getElementById('slip-input').value = result.ocr_text;
+        }
+        
+        showToast('Image analyzed successfully!', 'success', 'OCR Complete');
+    } catch (error) {
+        showToast(error.message, 'error', 'OCR Error');
+    } finally {
+        setLoading(false);
+    }
+});
+
+// Clear text
+document.getElementById('slip-clear-btn')?.addEventListener('click', () => {
+    document.getElementById('slip-input').value = '';
+    document.getElementById('slip-results').classList.remove('visible');
+    document.getElementById('slip-results').innerHTML = '';
+    showToast('Cleared', 'info', 'Betslip');
+});
+
+// Display slip results
+function displaySlipResults(result) {
+    const container = document.getElementById('slip-results');
+    if (!container) return;
+    
+    let html = '';
+    
+    // OCR text if available
+    if (result.ocr_text) {
+        html += `
+            <div style="background: #141b2b; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                <div style="color: #6a8aaa; font-size: 12px; margin-bottom: 4px;">📝 Detected Text:</div>
+                <div style="color: #e8edf5; font-size: 13px; white-space: pre-wrap; font-family: monospace;">${result.ocr_text}</div>
+            </div>
+        `;
+    }
+    
+    // Results
+    if (result.total_selections) {
+        html += `
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 20px; font-weight: 700; color: #e8edf5;">${result.total_selections}</div>
+                    <div style="font-size: 11px; color: #6a8aaa;">Total</div>
+                </div>
+                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 20px; font-weight: 700; color: #00c853;">${result.kept_count}</div>
+                    <div style="font-size: 11px; color: #6a8aaa;">Kept ✅</div>
+                </div>
+                <div style="background: #141b2b; padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 20px; font-weight: 700; color: #ff1744;">${result.removed_count}</div>
+                    <div style="font-size: 11px; color: #6a8aaa;">Removed ❌</div>
+                </div>
+            </div>
+            <div class="result-item">
+                <span class="key">Original Combined Odds</span>
+                <span class="value">${result.original_combined_odds}</span>
+            </div>
+            <div class="result-item">
+                <span class="key">Suggested Combined Odds</span>
+                <span class="value positive">${result.suggested_combined_odds}</span>
+            </div>
+            <div class="result-item">
+                <span class="key">Average Confidence</span>
+                <span class="value">${result.average_confidence}%</span>
+            </div>
+        `;
+        
+        // Show kept selections
+        if (result.kept && result.kept.length > 0) {
+            html += `
+                <div style="margin-top: 12px; border-top: 1px solid #1a2538; padding-top: 12px;">
+                    <div style="color: #00c853; font-weight: 600; margin-bottom: 8px;">✅ Kept Selections</div>
+                    ${result.kept.map((sel, i) => `
+                        <div style="background: #141b2b; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 13px; display: flex; justify-content: space-between;">
+                            <span>${sel.match || sel.selection}</span>
+                            <span style="color: #00c853;">${sel.odds} (${sel.confidence}%)</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        
+        // Show removed selections
+        if (result.removed && result.removed.length > 0) {
+            html += `
+                <div style="margin-top: 12px; border-top: 1px solid #1a2538; padding-top: 12px;">
+                    <div style="color: #ff1744; font-weight: 600; margin-bottom: 8px;">❌ Removed Selections</div>
+                    ${result.removed.map((sel, i) => `
+                        <div style="background: #141b2b; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 13px; display: flex; justify-content: space-between;">
+                            <span>${sel.match || sel.selection}</span>
+                            <span style="color: #ff6b6b;">${sel.reason || 'Risky'}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        
+        // Summary
+        if (result.summary) {
+            html += `
+                <div style="margin-top: 12px; border-top: 1px solid #2a3a5a; padding-top: 12px;">
+                    <div style="color: #ffab00; font-weight: 600; margin-bottom: 4px;">📌 Summary</div>
+                    <div style="color: #8aaccc; font-size: 14px;">${result.summary}</div>
+                </div>
+            `;
+        }
+    } else if (result.error) {
+        html += `
+            <div style="color: #ff1744; padding: 12px; text-align: center;">
+                ❌ ${result.error}
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+    container.classList.add('visible');
+}
+
+// Override the existing slip analyze handler to use displaySlipResults
+document.getElementById('slip-analyze-btn')?.addEventListener('click', async () => {
+    const text = document.getElementById('slip-input')?.value?.trim();
+    if (!text) {
+        showToast('Please paste your betslip text', 'error', 'Missing Input');
+        return;
+    }
+    
+    try {
+        setLoading(true);
+        const result = await analyzeSlip(text);
+        if (result) {
+            displaySlipResults(result);
+            showToast('Betslip analysis complete!', 'success', 'Betslip Analysis');
+        }
+    } catch (error) {
+        showToast('Betslip analysis failed', 'error', 'Error');
+    } finally {
+        setLoading(false);
+    }
+});
