@@ -97,24 +97,7 @@ class LiveOddsFetcher:
         self.live_fetch_timeout = 10
         self._odds_api_io = None
         
-    def _get_odds_api_io(self):
-        """Lazy load Odds-API.io client"""
-        if self._odds_api_io is None:
-            try:
-                from odds_api_io import OddsAPIIO
-                self._odds_api_io = OddsAPIIO()
-                if self._odds_api_io and self._odds_api_io.client:
-                    print("[DEBUG] Odds-API.io client initialized")
-                else:
-                    print("[DEBUG] Odds-API.io client not available - check API key")
-                    self._odds_api_io = False
-            except ImportError as e:
-                print(f"[DEBUG] Odds-API.io module not available: {e}")
-                self._odds_api_io = False
-            except Exception as e:
-                print(f"[DEBUG] Error initializing Odds-API.io: {e}")
-                self._odds_api_io = False
-        return self._odds_api_io
+    
     
     def get_supported_sites(self):
         """Return list of sites with live feed capability"""

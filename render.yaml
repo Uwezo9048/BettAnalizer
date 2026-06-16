@@ -1,14 +1,19 @@
 services:
   - type: web
-    name: sportybet-ai-assistant
+    name: bett-analizer
     runtime: python
-    plan: free
-    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
-      - key: RENDER
-        value: "true"
+        value: 3.11.4
+      - key: ODDS_API_IO_KEY
+        sync: false  # You'll set this in Render dashboard
       - key: LIVE_FEEDS_ENABLED
-        value: "true"
+        value: true
+      - key: RENDER
+        value: true
+      - key: FLASK_ENV
+        value: production
