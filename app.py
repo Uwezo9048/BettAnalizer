@@ -33,55 +33,88 @@ fetcher = get_fetcher()
 
 # ========== FORCE TESSERACT PATH ==========
 import pytesseract
+import subprocess
+import os
 
 # OVERRIDE: Force correct path for Render (Linux)
 if os.environ.get('RENDER') == 'true':
-    # Override any Windows path with Linux path
-    linux_tesseract = '/usr/bin/tesseract'
-    if os.path.exists(linux_tesseract):
-        pytesseract.pytesseract.tesseract_cmd = linux_tesseract
-        os.environ['TESSERACT_CMD'] = linux_tesseract
-        print(f"[OCR] Render detected - using: {linux_tesseract}")
-    else:
-        # Try alternative Linux paths
-        alt_paths = ['/usr/local/bin/tesseract', '/opt/render/project/src/.venv/bin/tesseract']
-        for path in alt_paths:
-            if os.path.exists(path):
-                pytesseract.pytesseract.tesseract_cmd = path
-                os.environ['TESSERACT_CMD'] = path
-                print(f"[OCR] Render detected - using: {path}")
-                break
-        else:
-            print("[OCR] Tesseract not found on Render. Try installing with build.sh")
-else:
-    # Local Windows/Linux/macOS
-    TESSERACT_PATHS = [
-        # Windows paths
-        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
-        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
-        # Linux paths
+    print("[OCR] 🔍 Running on Render - configuring Tesseract...")
+    
+    # Check if Tesseract exists
+    tesseract_paths = [
         '/usr/bin/tesseract',
         '/usr/local/bin/tesseract',
-        # macOS paths
-        '/opt/homebrew/bin/tesseract',
-        '/usr/local/Cellar/tesseract/*/bin/tesseract',
+        '/opt/render/project/src/.venv/bin/tesseract',
     ]
     
-    # First check environment variable
+    tesseract_found = False
+    for path in tesseract_paths:
+        if os.path.exists(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            os.environ['TESSERACT_CMD'] = path
+            print(f"[OCR] ✅ Tesseract found at: {path}")
+            tesseract_found = True
+            break
+    
+    if not tesseract_found:
+        # Try to find via which command
+        try:
+            import subprocess
+            result = subprocess.run(['which', 'tesseract'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout.strip():
+                path = result.stdout.strip()
+                pytesseract.pytesseract.tesseract_cmd = path
+                os.environ['TESSERACT_CMD'] = path
+                print(f"[OCR] ✅ Tesseract found via which: {path}")
+                tesseract_found = True
+        except:
+            pass
+    
+    # Try to find via find command
+    if not tesseract_found:
+        try:
+            result = subprocess.run(['find', '/usr', '-name', 'tesseract', '-type', 'f'], 
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and result.stdout.strip():
+                path = result.stdout.strip().split('\n')[0]
+                if os.path.exists(path):
+                    pytesseract.pytesseract.tesseract_cmd = path
+                    os.environ['TESSERACT_CMD'] = path
+                    print(f"[OCR] ✅ Tesseract found via find: {path}")
+                    tesseract_found = True
+        except:
+            pass
+    
+    if not tesseract_found:
+        print("[OCR] ❌ Tesseract not found on Render!")
+        print("[OCR] 💡 Check if build.sh installed Tesseract correctly")
+else:
+    # Local Windows/Linux/macOS
+    print("[OCR] 🔍 Running locally - configuring Tesseract...")
+    
+    TESSERACT_PATHS = [
+        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+        '/usr/bin/tesseract',
+        '/usr/local/bin/tesseract',
+        '/opt/homebrew/bin/tesseract',
+    ]
+    
     env_path = os.environ.get('TESSERACT_CMD')
     if env_path and os.path.exists(env_path):
         pytesseract.pytesseract.tesseract_cmd = env_path
-        print(f"✅ Tesseract found at: {env_path}")
+        print(f"[OCR] ✅ Tesseract found at: {env_path}")
     else:
-        # Check common paths
         for path in TESSERACT_PATHS:
             if os.path.exists(path):
                 pytesseract.pytesseract.tesseract_cmd = path
                 os.environ['TESSERACT_CMD'] = path
-                print(f"✅ Tesseract found at: {path}")
+                print(f"[OCR] ✅ Tesseract found at: {path}")
                 break
         else:
-            print("⚠️ Tesseract not found. OCR will not work.")
+            print("[OCR] ⚠️ Tesseract not found. OCR will not work.")
+            print("[OCR] 💡 Install Tesseract from: https://github.com/UB-Mannheim/tesseract/wiki")
+
 # ========== Routes ==========
 
 @app.route('/')

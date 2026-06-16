@@ -2,7 +2,9 @@ services:
   - type: web
     name: bett-analizer
     runtime: python
-    buildCommand: ./build.sh
+    buildCommand: |
+      chmod +x build.sh
+      ./build.sh
     startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
