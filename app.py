@@ -367,7 +367,10 @@ def analyze_betslip():
         ocr_text = ''
         if uploaded_file:
             ocr_text = _extract_text_from_image(uploaded_file)
-            print(f"[OCR] Extracted text: {ocr_text[:200]}..." if ocr_text else "[OCR] No text extracted")
+            if ocr_text:
+                print(f"[OCR] Extracted text: {ocr_text[:200]}...")
+            else:
+                print("[OCR] No text extracted from image")
         
         # Use user text if provided, otherwise OCR text
         slip_text = user_text or ocr_text
@@ -375,28 +378,35 @@ def analyze_betslip():
         # Check if we have any text
         if not slip_text:
             ocr_available = _ocr_available()
+            
+            # Build helpful error message
             error_msg = 'No readable betslip text found. '
-            if not ocr_available:
-                error_msg += 'OCR is not available on this server. Please paste the betslip text manually using the "Text Input" tab.'
+            if uploaded_file and not ocr_text:
+                error_msg += 'OCR could not extract text from the image. '
+                error_msg += 'Please paste the betslip text manually using the "Text Input" tab, '
+                error_msg += 'or upload a clearer image with better lighting and contrast.'
+            elif not uploaded_file and not user_text:
+                error_msg += 'Please paste your betslip text in the "Text Input" tab '
+                error_msg += 'using the format: "Team A vs Team B - Selection @ odds"'
             else:
-                error_msg += 'OCR could not extract text from the image. Please paste the betslip text manually or try a clearer image.'
+                error_msg += 'Please check your input and try again.'
             
             return jsonify({
                 'error': error_msg,
                 'ocr_available': ocr_available,
                 'ocr_text': ocr_text,
-                'tip': 'Switch to the "Text Input" tab and paste your betslip there.'
+                'tip': 'Switch to the "Text Input" tab and paste your betslip there.',
+                'example': 'Example: "Liverpool vs Arsenal - Home @ 2.10"'
             }), 400
 
         # Parse the betslip text
         selections = _parse_betslip_text(slip_text)
         if not selections:
             return jsonify({
-                'error': 'Could not detect selections and decimal odds from the betslip text. Please check the format and try again.',
-                'ocr_available': _ocr_available(),
-                'ocr_text': ocr_text,
+                'error': 'Could not detect selections and decimal odds from the betslip text.',
+                'tip': 'Format: "Team A vs Team B - Selection @ odds" (e.g., "Liverpool vs Arsenal - Home @ 2.10")',
                 'source_text': slip_text,
-                'tip': 'Format: "Team A vs Team B - Selection @ odds" (e.g., "Liverpool vs Arsenal - Home @ 2.10")'
+                'example': 'Liverpool vs Arsenal - Home @ 2.10\nReal Madrid vs Barcelona - Draw @ 3.40'
             }), 400
 
         # Analyze each selection
@@ -427,6 +437,8 @@ def analyze_betslip():
 
     except Exception as e:
         print(f"[Betslip Error] {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/status')
