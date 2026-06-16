@@ -2,18 +2,18 @@ services:
   - type: web
     name: bett-analizer
     runtime: python
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
+    buildCommand: ./build.sh
     startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.4
       - key: ODDS_API_IO_KEY
-        sync: false  # You'll set this in Render dashboard
+        sync: false
       - key: LIVE_FEEDS_ENABLED
         value: true
       - key: RENDER
         value: true
       - key: FLASK_ENV
         value: production
+      - key: TESSERACT_CMD
+        value: /usr/bin/tesseract

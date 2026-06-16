@@ -482,6 +482,184 @@ def _analyze_slip_selection(selection):
         'suggested_stake': round(ai.calculate_kelly_stake(odds, true_probability), 2) if decision == 'keep' else 0
     }
 
+# ========== OCR Helper Functions ==========
+
+def _ocr_available():
+    """Check if OCR is available"""
+    try:
+        import pytesseract
+        from PIL import Image
+        # Check if tesseract is installed
+        import subprocess
+        try:
+            # Try to get tesseract version
+            subprocess.run(['tesseract', '--version'], capture_output=True, check=True)
+            return True
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return False
+    except Exception:
+        return False
+
+def _get_tesseract_command():
+    """Get tesseract command path"""
+    # Check common installation paths
+    common_paths = [
+        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+        '/usr/bin/tesseract',
+        '/usr/local/bin/tesseract',
+        '/opt/homebrew/bin/tesseract',
+    ]
+    
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+    
+    # Try to find via which command
+    try:
+        import shutil
+        return shutil.which('tesseract')
+    except:
+        return None
+
+def _extract_text_from_image(uploaded_file):
+    """Extract text from uploaded image using OCR"""
+    if not uploaded_file:
+        return ''
+    
+    try:
+        # Check if OCR is available
+        if not _ocr_available():
+            print("[OCR] Tesseract not available. Please install Tesseract OCR.")
+            return ''
+        
+        from io import BytesIO
+        import pytesseract
+        from PIL import Image, ImageEnhance, ImageFilter
+        
+        # Set tesseract command
+        tesseract_cmd = _get_tesseract_command()
+        if tesseract_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+        
+        # Read image
+        image = Image.open(BytesIO(uploaded_file.read()))
+        
+        # Preprocess image for better OCR
+        # Convert to grayscale
+        if image.mode != 'L':
+            image = image.convert('L')
+        
+        # Enhance contrast
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(2.0)
+        
+        # Apply slight sharpening
+        image = image.filter(ImageFilter.SHARPEN)
+        
+        # Resize if too small
+        width, height = image.size
+        if width < 800:
+            new_width = 800
+            new_height = int(height * (800 / width))
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # OCR with multiple configs for better accuracy
+        configs = [
+            '--psm 6 --oem 3',  # Block of text, default OCR
+            '--psm 4 --oem 3',  # Single column
+            '--psm 12 --oem 3',  # Sparse text with OSD
+        ]
+        
+        # Try different configs and take the one with most text
+        best_text = ''
+        for config in configs:
+            try:
+                text = pytesseract.image_to_string(image, config=config)
+                if len(text.strip()) > len(best_text):
+                    best_text = text
+            except:
+                continue
+        
+        return best_text.strip()
+        
+    except Exception as e:
+        print(f"[OCR Error] {e}")
+        return ''
+
+@app.route('/api/analyze-slip', methods=['POST'])
+def analyze_betslip():
+    """Analyze a screenshot/text betslip and suggest a cleaner slip."""
+    try:
+        uploaded_file = request.files.get('screenshot')
+        user_text = request.form.get('slip_text', '').strip()
+        
+        # Try OCR if image uploaded
+        ocr_text = ''
+        if uploaded_file:
+            ocr_text = _extract_text_from_image(uploaded_file)
+            print(f"[OCR] Extracted text: {ocr_text[:200]}..." if ocr_text else "[OCR] No text extracted")
+        
+        # Use user text if provided, otherwise OCR text
+        slip_text = user_text or ocr_text
+        
+        # Check if we have any text
+        if not slip_text:
+            ocr_available = _ocr_available()
+            error_msg = 'No readable betslip text found. '
+            if not ocr_available:
+                error_msg += 'OCR is not available on this server. Please paste the betslip text manually using the "Text Input" tab.'
+            else:
+                error_msg += 'OCR could not extract text from the image. Please paste the betslip text manually or try a clearer image.'
+            
+            return jsonify({
+                'error': error_msg,
+                'ocr_available': ocr_available,
+                'ocr_text': ocr_text,
+                'tip': 'Switch to the "Text Input" tab and paste your betslip there.'
+            }), 400
+
+        # Parse the betslip text
+        selections = _parse_betslip_text(slip_text)
+        if not selections:
+            return jsonify({
+                'error': 'Could not detect selections and decimal odds from the betslip text. Please check the format and try again.',
+                'ocr_available': _ocr_available(),
+                'ocr_text': ocr_text,
+                'source_text': slip_text,
+                'tip': 'Format: "Team A vs Team B - Selection @ odds" (e.g., "Liverpool vs Arsenal - Home @ 2.10")'
+            }), 400
+
+        # Analyze each selection
+        analyzed = [_analyze_slip_selection(selection) for selection in selections]
+        kept = [selection for selection in analyzed if selection['decision'] == 'keep']
+        removed = [selection for selection in analyzed if selection['decision'] == 'remove']
+
+        original_odds = _combined_odds(analyzed)
+        suggested_odds = _combined_odds(kept)
+        average_confidence = round(sum(item['confidence'] for item in kept) / len(kept), 1) if kept else 0
+
+        return jsonify({
+            'ocr_available': _ocr_available(),
+            'ocr_text': ocr_text,
+            'source_text': slip_text,
+            'total_selections': len(analyzed),
+            'kept_count': len(kept),
+            'removed_count': len(removed),
+            'original_combined_odds': original_odds,
+            'suggested_combined_odds': suggested_odds,
+            'average_confidence': average_confidence,
+            'kept': kept,
+            'removed': removed,
+            'all_selections': analyzed,
+            'summary': _build_betslip_summary(len(analyzed), kept, removed, original_odds, suggested_odds),
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        print(f"[Betslip Error] {e}")
+        return jsonify({'error': str(e)}), 500
+
 def _combined_odds(selections):
     if not selections:
         return 0
