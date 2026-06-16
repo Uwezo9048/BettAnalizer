@@ -10,8 +10,8 @@ if [ "$RENDER" = "true" ]; then
     echo "📦 Installing Tesseract OCR on Render..."
     echo "========================================="
     
-    # Update package list
-    echo "📦 Updating package list..."
+    # Update package list (with non-interactive mode)
+    export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
     
     # Install Tesseract with all dependencies
@@ -30,8 +30,12 @@ if [ "$RENDER" = "true" ]; then
     else
         echo "❌ Tesseract not found at /usr/bin/tesseract"
         # Try to find it
-        find /usr -name "tesseract" 2>/dev/null || echo "Tesseract not found anywhere"
+        find /usr -name "tesseract" 2>/dev/null || echo "Tesseract not found"
     fi
+    
+    # Set environment variable for this session
+    export TESSERACT_CMD=/usr/bin/tesseract
+    echo "✅ TESSERACT_CMD set to: $TESSERACT_CMD"
     
     echo "========================================="
     echo "✅ Tesseract installation complete!"
