@@ -1,690 +1,798 @@
-let currentSite = 'sportybet';
-let currentSport = 'football';
-let currentMatches = [];
-let supportedSites = [];
-let supportedSports = [];
+/**
+ * BetAnalyzer - Main Application
+ * Handles UI interactions, API calls, and real-time updates
+ */
 
-const siteSearchInput = document.getElementById('siteSearchInput');
-const siteGrid = document.getElementById('siteGrid');
-const selectedSiteDisplay = document.getElementById('selectedSiteDisplay');
-const siteInfoText = document.getElementById('siteInfoText');
-const sportsGrid = document.getElementById('sportsGrid');
-const selectedSportBadge = document.getElementById('selectedSportBadge');
-const refreshBtn = document.getElementById('refreshBtn');
-const liveMatchesContainer = document.getElementById('liveMatchesContainer');
-const upcomingMatchesContainer = document.getElementById('upcomingMatchesContainer');
-const matchesSourceText = document.getElementById('matchesSourceText');
-const upcomingSourceText = document.getElementById('upcomingSourceText');
-const matchesCountDisplay = document.getElementById('matchesCountDisplay');
-const matchesCount = document.getElementById('matchesCount');
-const upcomingMatchesCount = document.getElementById('upcomingMatchesCount');
-const valueBetsCount = document.getElementById('valueBetsCount');
-const aiSelectionPanel = document.getElementById('aiSelectionPanel');
-const analyzeAllBtn = document.getElementById('analyzeAllBtn');
-const globalResults = document.getElementById('globalResults');
-const globalResultsContainer = document.getElementById('globalResultsContainer');
-const apiStatusBadge = document.getElementById('apiStatusBadge');
+// ============================================
+// State Management
+// ============================================
 
-const manualHomeTeam = document.getElementById('manualHomeTeam');
-const manualAwayTeam = document.getElementById('manualAwayTeam');
-const manualMarket = document.getElementById('manualMarket');
-const manualOutcome = document.getElementById('manualOutcome');
-const manualOdds = document.getElementById('manualOdds');
-const manualPredictBtn = document.getElementById('manualPredictBtn');
-const manualResult = document.getElementById('manualResult');
-const slipScreenshotInput = document.getElementById('slipScreenshotInput');
-const slipFileName = document.getElementById('slipFileName');
-const slipPreview = document.getElementById('slipPreview');
-const slipTextInput = document.getElementById('slipTextInput');
-const typedSlipRows = document.getElementById('typedSlipRows');
-const addSlipRowBtn = document.getElementById('addSlipRowBtn');
-const analyzeSlipBtn = document.getElementById('analyzeSlipBtn');
-const slipAnalysisResult = document.getElementById('slipAnalysisResult');
-
-const siteGradients = {
-    sportybet: 'gradient-sporty',
-    bet9ja: 'gradient-bet9ja',
-    '22bet': 'gradient-purple',
-    paripesa: 'gradient-green',
-    nairabet: 'gradient-purple',
-    betking: 'gradient-green'
+const AppState = {
+    currentSite: 'sportybet',
+    currentSport: 'football',
+    currentLeague: null,
+    matches: [],
+    valueBets: [],
+    isLoading: false,
+    autoRefresh: false,
+    refreshInterval: null,
+    selectedMatch: null
 };
 
-async function init() {
-    setupEventListeners();
-    await checkAPIStatus();
-    await loadSupportedSites();
-    await loadSupportedSports();
-    await loadMatches();
+// ============================================
+// DOM References
+// ============================================
+
+const DOM = {
+    // Selectors
+    siteSelect: document.getElementById('site-select'),
+    sportSelect: document.getElementById('sport-select'),
+    leagueSelect: document.getElementById('league-select'),
+    
+    // Buttons
+    refreshBtn: document.getElementById('refresh-btn'),
+    analyzeAllBtn: document.getElementById('analyze-all-btn'),
+    autoRefreshToggle: document.getElementById('auto-refresh-toggle'),
+    
+    // Containers
+    matchesContainer: document.getElementById('matches-container'),
+    statsContainer: document.getElementById('stats-container'),
+    aiSelectionContainer: document.getElementById('ai-selection-container'),
+    analysisResults: document.getElementById('analysis-results'),
+    
+    // Status
+    liveStatus: document.getElementById('live-status'),
+    statusDot: document.getElementById('status-dot'),
+    matchCount: document.getElementById('match-count'),
+    valueBetCount: document.getElementById('value-bet-count'),
+    
+    // Manual Entry
+    manualHome: document.getElementById('manual-home'),
+    manualAway: document.getElementById('manual-away'),
+    manualMarket: document.getElementById('manual-market'),
+    manualOutcome: document.getElementById('manual-outcome'),
+    manualOdds: document.getElementById('manual-odds'),
+    manualPredictBtn: document.getElementById('manual-predict-btn'),
+    manualResults: document.getElementById('manual-results'),
+    
+    // Betslip
+    slipInput: document.getElementById('slip-input'),
+    slipAnalyzeBtn: document.getElementById('slip-analyze-btn'),
+    slipResults: document.getElementById('slip-results'),
+    
+    // Toast
+    toast: document.getElementById('toast'),
+    
+    // Loading
+    loadingOverlay: document.getElementById('loading-overlay')
+};
+
+// ============================================
+// Toast Notifications
+// ============================================
+
+function showToast(message, type = 'info', title = '') {
+    const toast = DOM.toast;
+    if (!toast) return;
+    
+    toast.className = 'toast';
+    toast.classList.add(type);
+    
+    const titleEl = toast.querySelector('.toast-title');
+    const msgEl = toast.querySelector('.toast-message');
+    
+    if (titleEl) titleEl.textContent = title || type.toUpperCase();
+    if (msgEl) msgEl.textContent = message;
+    
+    toast.classList.add('show');
+    
+    clearTimeout(toast._hideTimeout);
+    toast._hideTimeout = setTimeout(() => {
+        toast.classList.remove('show');
+    }, 4000);
 }
 
-async function checkAPIStatus() {
+// ============================================
+// Loading State
+// ============================================
+
+function setLoading(isLoading) {
+    AppState.isLoading = isLoading;
+    if (DOM.loadingOverlay) {
+        DOM.loadingOverlay.style.display = isLoading ? 'flex' : 'none';
+    }
+    if (DOM.refreshBtn) {
+        DOM.refreshBtn.disabled = isLoading;
+        DOM.refreshBtn.textContent = isLoading ? '⏳ Loading...' : '🔄 Refresh Odds';
+    }
+}
+
+// ============================================
+// API Calls
+// ============================================
+
+async function apiFetch(endpoint, options = {}) {
     try {
-        const response = await fetch('/api/status');
-        const data = await response.json();
-
-        if (data.live_feeds_active) {
-            apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full live-indicator"></span> Live Feeds Active';
-            apiStatusBadge.className = 'status-pill gradient-green';
-        } else if (!data.live_feeds_enabled) {
-            apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Demo Mode';
-            apiStatusBadge.className = 'status-pill bg-gray-800';
-        } else if (data.oddsafrica_api_available) {
-            apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Live Feeds Disabled';
-            apiStatusBadge.className = 'status-pill bg-gray-800';
-        } else {
-            apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-red-500 rounded-full"></span> API Not Installed';
-            apiStatusBadge.className = 'status-pill bg-gray-800';
-        }
-    } catch (error) {
-        console.error('Status check failed:', error);
-        apiStatusBadge.innerHTML = '<span class="w-2 h-2 bg-red-500 rounded-full"></span> Server Error';
-    }
-}
-
-async function loadSupportedSites() {
-    try {
-        const response = await fetch('/api/sites');
-        const data = await response.json();
-        supportedSites = data.sites || [];
-        renderSites(supportedSites);
-        updateSelectedSiteDisplay();
-    } catch (error) {
-        console.error('Error loading sites:', error);
-        siteGrid.innerHTML = '<div class="text-sm text-red-300">Could not load betting sites.</div>';
-    }
-}
-
-function renderSites(sites) {
-    if (!siteGrid) return;
-
-    if (!sites.length) {
-        siteGrid.innerHTML = '<div class="text-sm text-gray-400">No matching sites found.</div>';
-        return;
-    }
-
-    siteGrid.innerHTML = sites.map(site => `
-        <button type="button" onclick="selectSite('${site.id}')"
-            class="site-card ${site.id === currentSite ? 'active' : ''}">
-            <span>
-                <span class="site-card-name">${escapeHtml(site.name)}</span>
-                <span class="site-card-country">${escapeHtml(site.country)}</span>
-            </span>
-            ${site.is_default ? '<span class="site-card-badge">Default</span>' : ''}
-        </button>
-    `).join('');
-}
-
-async function selectSite(siteId) {
-    currentSite = siteId;
-    const site = supportedSites.find(item => item.id === siteId);
-    siteSearchInput.value = site?.name || '';
-    updateSelectedSiteDisplay();
-    renderSites(supportedSites);
-    await loadSupportedSports();
-    await loadMatches();
-}
-
-function updateSelectedSiteDisplay() {
-    const site = supportedSites.find(item => item.id === currentSite) || {
-        id: 'sportybet',
-        name: 'SportyBet',
-        is_default: true,
-        live_feed: false
-    };
-
-    const gradientClass = siteGradients[site.id] || 'gradient-purple';
-    selectedSiteDisplay.className = `selected-site mt-5 ${gradientClass}`;
-    selectedSiteDisplay.innerHTML = `
-        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
-            <div>
-                <span class="font-bold">${escapeHtml(site.name)}</span>
-                ${site.is_default ? '<span class="text-xs ml-2 opacity-80">Default</span>' : ''}
-            </div>
-            <div class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-green-500 rounded-full live-indicator"></span>
-                <span class="text-sm">${site.live_feed ? 'Ready' : 'Demo Mode'}</span>
-            </div>
-        </div>
-    `;
-    siteInfoText.textContent = `${site.name} selected.`;
-}
-
-async function loadSupportedSports() {
-    if (!sportsGrid) return;
-
-    try {
-        const response = await fetch(`/api/sports?site=${encodeURIComponent(currentSite)}`);
-        const data = await response.json();
-
-        if (data.error) {
-            sportsGrid.innerHTML = `<div class="text-sm text-red-300">${escapeHtml(data.error)}</div>`;
-            return;
-        }
-
-        supportedSports = data.sports || [];
-        if (!supportedSports.some(sport => sport.id === currentSport && sport.enabled)) {
-            currentSport = data.default || 'football';
-        }
-        renderSports();
-        updateSelectedSportBadge();
-    } catch (error) {
-        console.error('Error loading sports:', error);
-        sportsGrid.innerHTML = '<div class="text-sm text-red-300">Could not load sports categories.</div>';
-    }
-}
-
-function renderSports() {
-    if (!sportsGrid) return;
-
-    if (!supportedSports.length) {
-        sportsGrid.innerHTML = '<div class="text-sm text-gray-400">No sports categories found.</div>';
-        return;
-    }
-
-    sportsGrid.innerHTML = supportedSports.map(sport => {
-        const countLabel = sport.stored_count > 0 ? ` (${sport.stored_count})` : '';
-        const disabled = !sport.enabled;
-        return `
-            <button type="button"
-                class="sport-card ${sport.id === currentSport ? 'active' : ''} ${disabled ? 'disabled' : ''}"
-                ${disabled ? 'disabled title="Feed not connected yet"' : `onclick="selectSport('${sport.id}')"`}>
-                <span class="sport-icon">${escapeHtml(sport.icon)}</span>
-                <span class="sport-name">${escapeHtml(sport.name)}${countLabel}</span>
-                ${disabled ? '<span class="sport-status">Soon</span>' : ''}
-            </button>
-        `;
-    }).join('');
-}
-
-async function selectSport(sportId) {
-    const sport = supportedSports.find(item => item.id === sportId);
-    if (!sport || !sport.enabled) return;
-
-    currentSport = sportId;
-    renderSports();
-    updateSelectedSportBadge();
-    await loadMatches();
-}
-
-function updateSelectedSportBadge() {
-    if (!selectedSportBadge) return;
-    const sport = supportedSports.find(item => item.id === currentSport) || { name: 'Football' };
-    selectedSportBadge.textContent = sport.name;
-}
-
-async function loadMatches() {
-    liveMatchesContainer.innerHTML = '<div class="p-8 text-center"><div class="loading-spinner"></div><p class="text-gray-400 mt-2">Fetching live odds...</p></div>';
-    upcomingMatchesContainer.innerHTML = '<div class="p-8 text-center"><div class="loading-spinner"></div><p class="text-gray-400 mt-2">Fetching upcoming matches...</p></div>';
-
-    try {
-        const response = await fetch('/api/matches', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ site: currentSite, sport: currentSport })
+        const response = await fetch(endpoint, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            },
+            ...options
         });
-        const data = await response.json();
-
-        if (data.error) {
-            liveMatchesContainer.innerHTML = `<div class="p-8 text-center text-red-300">Error: ${escapeHtml(data.error)}</div>`;
-            upcomingMatchesContainer.innerHTML = '<div class="p-8 text-center text-gray-400">No upcoming matches loaded.</div>';
-            return;
+        
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+            throw new Error(error.error || `HTTP ${response.status}`);
         }
-
-        currentMatches = data.matches || [];
-        const liveMatches = currentMatches.filter(isLiveMatch);
-        const upcomingMatches = currentMatches.filter(match => !isLiveMatch(match));
-        matchesCountDisplay.textContent = currentMatches.length;
-        matchesCount.textContent = `${liveMatches.length} live`;
-        upcomingMatchesCount.textContent = `${upcomingMatches.length} upcoming`;
-        const sourceLabels = {
-            live: 'Live odds',
-            stored: 'Stored odds',
-            sample: 'Sample data',
-            empty: 'No matches',
-            unsupported: 'Feed not connected'
-        };
-        const sportName = data.sport_name || getCurrentSportName();
-        matchesSourceText.textContent = `${data.site_name} - ${sportName} - ${sourceLabels[data.data_source] || 'Sample data'}`;
-        upcomingSourceText.textContent = `${data.site_name} - ${sportName} - not live yet`;
-
-        renderMatches(liveMatches, liveMatchesContainer, 'No live matches right now. Upcoming matches are listed below.');
-        renderMatches(upcomingMatches, upcomingMatchesContainer, 'No upcoming matches available at this time.');
-        await analyzeAllMatches();
+        
+        return await response.json();
     } catch (error) {
-        console.error('Error loading matches:', error);
-        liveMatchesContainer.innerHTML = `<div class="p-8 text-center text-red-300">Failed to load matches: ${escapeHtml(error.message)}</div>`;
-        upcomingMatchesContainer.innerHTML = '<div class="p-8 text-center text-gray-400">No upcoming matches loaded.</div>';
+        console.error(`API Error (${endpoint}):`, error);
+        showToast(error.message || 'Failed to fetch data', 'error', 'API Error');
+        throw error;
     }
 }
 
-function isLiveMatch(match) {
-    return Boolean(match.live && !match.from_storage && !match.sample);
+async function fetchSites() {
+    try {
+        const data = await apiFetch('/api/sites');
+        return data.sites || [];
+    } catch (error) {
+        return [];
+    }
 }
 
-function getCurrentSportName() {
-    return supportedSports.find(item => item.id === currentSport)?.name || 'Football';
+async function fetchSports(site) {
+    try {
+        const data = await apiFetch(`/api/sports?site=${site}`);
+        return data.sports || [];
+    } catch (error) {
+        return [];
+    }
 }
 
-function renderMatches(matches, container, emptyMessage) {
-    if (!matches.length) {
-        container.innerHTML = `<div class="p-8 text-center text-gray-400">${escapeHtml(emptyMessage)}</div>`;
-        return;
+async function fetchLeagues(site, sport) {
+    try {
+        const data = await apiFetch(`/api/leagues?site=${site}&sport=${sport}`);
+        return data.leagues || [];
+    } catch (error) {
+        return [];
     }
-
-    container.innerHTML = matches.map(match => `
-        <button type="button" class="match-card block w-full text-left p-4 hover:bg-gray-800/80"
-            onclick="analyzeMatch(${encodeForInlineJson(match)})">
-            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
-                <div>
-                    <div class="font-bold text-lg">${escapeHtml(match.home_team)} vs ${escapeHtml(match.away_team)}</div>
-                    <div class="text-xs text-gray-400">${escapeHtml(match.league || match.country || getCurrentSportName())}</div>
-                </div>
-                <div class="flex gap-2">
-                    ${isLiveMatch(match) ? '<span class="bg-red-600/80 text-white text-xs px-2 py-1 rounded-full live-indicator">LIVE</span>' : '<span class="bg-blue-600/60 text-white text-xs px-2 py-1 rounded-full">Upcoming</span>'}
-                    ${match.sample ? '<span class="bg-yellow-600/60 text-white text-xs px-2 py-1 rounded-full">Sample</span>' : ''}
-                </div>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center text-sm">
-                ${renderMarketOdds(match.markets, '1X2', '1X2')}
-                ${renderMarketOdds(match.markets, 'Over/Under', 'O/U')}
-                ${renderMarketOdds(match.markets, 'GG/NG', 'GG/NG')}
-            </div>
-            <div class="mt-3 text-xs text-purple-300 text-center">Click for AI analysis</div>
-        </button>
-    `).join('');
 }
 
-function renderMarketOdds(markets, marketName, displayName) {
-    const market = markets?.[marketName];
-    if (!market) {
-        return `<div class="bg-gray-800 rounded p-2"><div class="text-gray-400">${displayName}</div><div class="text-xs">-</div></div>`;
+async function fetchMatches(site, sport, league = null) {
+    try {
+        setLoading(true);
+        const data = await apiFetch('/api/matches', {
+            method: 'POST',
+            body: JSON.stringify({
+                site: site,
+                sport: sport,
+                league: league
+            })
+        });
+        
+        AppState.matches = data.matches || [];
+        return data;
+    } catch (error) {
+        AppState.matches = [];
+        return { matches: [], count: 0 };
+    } finally {
+        setLoading(false);
     }
+}
 
-    let oddsHtml = '';
-    if (marketName === '1X2') {
-        oddsHtml = `${market.Home || '-'} | ${market.Draw || '-'} | ${market.Away || '-'}`;
-    } else if (marketName === 'GG/NG') {
-        oddsHtml = `Y:${market.Yes || '-'} | N:${market.No || '-'}`;
-    } else {
-        oddsHtml = Object.entries(market).slice(0, 2).map(([key, value]) => `${key}:${value}`).join(' | ');
+async function analyzeAllMatches(matches, siteName) {
+    try {
+        const data = await apiFetch('/api/analyze-all', {
+            method: 'POST',
+            body: JSON.stringify({
+                matches: matches,
+                site_name: siteName
+            })
+        });
+        return data;
+    } catch (error) {
+        showToast('Failed to analyze matches', 'error', 'Analysis Error');
+        return null;
     }
-
-    return `<div class="bg-gray-800 rounded p-2"><div class="text-gray-400">${displayName}</div><div class="font-mono text-xs">${escapeHtml(oddsHtml)}</div></div>`;
 }
 
 async function analyzeMatch(match) {
-    aiSelectionPanel.innerHTML = '<div class="text-center py-8"><div class="loading-spinner"></div><p class="text-gray-400 mt-2">AI analyzing odds...</p></div>';
-
     try {
-        const response = await fetch('/api/analyze', {
+        const data = await apiFetch('/api/analyze', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ match })
+            body: JSON.stringify({ match: match })
         });
-        const data = await response.json();
-
-        if (data.error) {
-            aiSelectionPanel.innerHTML = `<div class="text-red-300 text-center py-8">Error: ${escapeHtml(data.error)}</div>`;
-            return;
-        }
-
-        renderAISelection(data.analysis);
+        return data.analysis || null;
     } catch (error) {
-        console.error('Analysis error:', error);
-        aiSelectionPanel.innerHTML = '<div class="text-red-300 text-center py-8">Analysis failed.</div>';
+        showToast('Failed to analyze match', 'error', 'Analysis Error');
+        return null;
     }
 }
 
-function renderAISelection(analysis) {
-    if (!analysis.ai_selection) {
-        aiSelectionPanel.innerHTML = `
-            <div class="text-center py-6">
-                <div class="text-yellow-300 mb-2">No significant value bets found</div>
-                <div class="text-sm text-gray-400">Try another match or enter odds manually.</div>
-            </div>
-        `;
-        return;
-    }
-
-    const bet = analysis.ai_selection;
-    aiSelectionPanel.innerHTML = `
-        <div class="space-y-4">
-            <div class="text-center">
-                <div class="text-gray-400 text-sm">${escapeHtml(analysis.match)}</div>
-                <div class="text-2xl font-bold text-green-300 mt-1">${escapeHtml(bet.outcome)}</div>
-                <div class="text-3xl font-bold my-2">${bet.odds}</div>
-                <div class="inline-block px-3 py-1 rounded-full text-sm ${bet.value_edge > 10 ? 'bg-green-600' : bet.value_edge > 5 ? 'bg-yellow-600' : 'bg-blue-600'}">
-                    ${bet.value_edge > 0 ? '+' : ''}${bet.value_edge}% Edge
-                </div>
-            </div>
-            <div class="grid grid-cols-2 gap-3 text-sm">
-                ${metricBox('Market', bet.market)}
-                ${metricBox('Confidence', `${bet.confidence}%`, 'text-yellow-300')}
-                ${metricBox('True Probability', `${bet.true_probability}%`)}
-                ${metricBox('Suggested Stake', `KES ${bet.suggested_stake}`)}
-            </div>
-            <div class="text-xs text-gray-400 text-center p-2 bg-gray-800 rounded">${escapeHtml(bet.recommendation)}</div>
-            ${renderOtherBets(analysis.all_value_bets)}
-        </div>
-    `;
-}
-
-function metricBox(label, value, valueClass = '') {
-    return `
-        <div class="bg-gray-800 rounded p-2 text-center">
-            <div class="text-gray-400">${label}</div>
-            <div class="font-semibold ${valueClass}">${escapeHtml(String(value))}</div>
-        </div>
-    `;
-}
-
-function renderOtherBets(bets = []) {
-    if (bets.length <= 1) return '';
-
-    return `
-        <div class="border-t border-gray-800 pt-3 mt-2">
-            <div class="text-xs text-gray-400 mb-2">Other opportunities</div>
-            <div class="space-y-1">
-                ${bets.slice(1, 4).map(bet => `
-                    <div class="flex justify-between gap-3 text-xs">
-                        <span>${escapeHtml(bet.market)} - ${escapeHtml(bet.outcome)}</span>
-                        <span class="${bet.value_edge > 0 ? 'text-green-300' : 'text-red-300'}">${bet.value_edge > 0 ? '+' : ''}${bet.value_edge}%</span>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-    `;
-}
-
-async function analyzeAllMatches() {
-    if (!currentMatches.length) return;
-
-    globalResults.classList.remove('hidden');
-    globalResultsContainer.innerHTML = '<div class="text-center py-8"><div class="loading-spinner"></div><p class="text-gray-400 mt-2">AI scanning matches...</p></div>';
-
+async function customPredict(home, away, market, outcome, odds) {
     try {
-        const siteName = supportedSites.find(site => site.id === currentSite)?.name || currentSite;
-        const response = await fetch('/api/analyze-all', {
+        const data = await apiFetch('/api/custom-predict', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ matches: currentMatches, site_name: siteName })
+            body: JSON.stringify({
+                home_team: home,
+                away_team: away,
+                market: market,
+                outcome: outcome,
+                odds: parseFloat(odds)
+            })
         });
-        const data = await response.json();
-
-        valueBetsCount.textContent = data.total_value_bets || 0;
-
-        if (data.top_bets && data.top_bets.length) {
-            globalResultsContainer.innerHTML = `
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    ${data.top_bets.map(bet => `
-                        <div class="bg-gray-800 rounded-lg p-3 border border-white/5">
-                            <div class="flex justify-between items-start gap-3">
-                                <div>
-                                    <div class="font-semibold text-sm">${escapeHtml(bet.match_name)}</div>
-                                    <div class="text-xs text-gray-400">${escapeHtml(bet.market)} - ${escapeHtml(bet.outcome)}</div>
-                                    <div class="text-lg font-bold text-green-300 mt-1">${bet.odds}</div>
-                                </div>
-                                <div class="text-right">
-                                    <div class="text-2xl font-bold ${bet.value_edge > 0 ? 'text-green-300' : 'text-red-300'}">
-                                        ${bet.value_edge > 0 ? '+' : ''}${bet.value_edge}%
-                                    </div>
-                                    <div class="text-xs text-gray-400">Edge</div>
-                                </div>
-                            </div>
-                            <div class="mt-2 text-xs text-gray-400">${escapeHtml(bet.recommendation)}</div>
-                        </div>
-                    `).join('')}
-                </div>
-                <div class="mt-4 text-xs text-center text-gray-500">Based on ${data.total_matches} matches from ${escapeHtml(data.site)}</div>
-            `;
-        } else {
-            globalResultsContainer.innerHTML = '<div class="text-center py-8 text-gray-400">No value bets found in current matches.</div>';
-        }
+        return data;
     } catch (error) {
-        console.error('Error analyzing all matches:', error);
-        globalResultsContainer.innerHTML = '<div class="text-center py-8 text-red-300">Analysis failed.</div>';
+        showToast('Prediction failed', 'error', 'Error');
+        return null;
     }
 }
 
-manualPredictBtn.addEventListener('click', async () => {
-    const homeTeam = manualHomeTeam.value || 'Home';
-    const awayTeam = manualAwayTeam.value || 'Away';
-    const market = manualMarket.value;
-    const outcome = manualOutcome.value;
-    const odds = parseFloat(manualOdds.value);
-
-    if (!outcome) {
-        alert('Please enter outcome');
-        return;
-    }
-
-    if (!odds || odds < 1.01) {
-        alert('Please enter valid odds');
-        return;
-    }
-
-    manualResult.classList.remove('hidden');
-    manualResult.innerHTML = '<div class="loading-spinner" style="width:20px;height:20px"></div><p class="text-xs mt-1">AI analyzing...</p>';
-
+async function analyzeSlip(text) {
     try {
-        const response = await fetch('/api/custom-predict', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ home_team: homeTeam, away_team: awayTeam, market, outcome, odds })
-        });
-        const data = await response.json();
-
-        manualResult.innerHTML = `
-            <div class="space-y-2">
-                <div class="font-bold text-sm">${escapeHtml(data.ai_prediction)}</div>
-                <div class="grid grid-cols-2 gap-2 text-xs">
-                    <div>Implied Prob:</div><div class="font-mono">${data.implied_probability}%</div>
-                    <div>AI True Prob:</div><div class="font-mono">${data.true_probability}%</div>
-                    <div>Value Edge:</div><div class="font-mono">${data.value_edge > 0 ? '+' : ''}${data.value_edge}%</div>
-                    <div>Confidence:</div><div class="font-mono">${data.confidence}%</div>
-                </div>
-                ${data.suggested_stake > 0 ? `<div class="text-xs text-green-300">Suggested stake: KES ${data.suggested_stake}</div>` : ''}
-                <div class="text-xs text-gray-400">${escapeHtml(data.recommendation)}</div>
-            </div>
-        `;
-    } catch (error) {
-        manualResult.innerHTML = `<div class="text-red-300 text-xs">Error: ${escapeHtml(error.message)}</div>`;
-    }
-});
-
-slipScreenshotInput.addEventListener('change', () => {
-    const file = slipScreenshotInput.files?.[0];
-    if (!file) {
-        slipFileName.textContent = 'PNG, JPG, or WEBP';
-        slipPreview.classList.add('hidden');
-        slipPreview.removeAttribute('src');
-        return;
-    }
-
-    slipFileName.textContent = file.name;
-    slipPreview.src = URL.createObjectURL(file);
-    slipPreview.classList.remove('hidden');
-});
-
-addSlipRowBtn.addEventListener('click', () => addTypedSlipRow());
-analyzeSlipBtn.addEventListener('click', analyzeBetslip);
-addTypedSlipRow();
-
-async function analyzeBetslip() {
-    const file = slipScreenshotInput.files?.[0];
-    const slipText = slipTextInput.value.trim();
-    const typedSlipText = getTypedSlipText();
-    const combinedSlipText = [slipText, typedSlipText].filter(Boolean).join('\n');
-
-    if (!file && !combinedSlipText) {
-        alert('Upload a screenshot, paste betslip text, or type odds manually first');
-        return;
-    }
-
-    const formData = new FormData();
-    if (file) formData.append('screenshot', file);
-    formData.append('slip_text', combinedSlipText);
-
-    slipAnalysisResult.classList.remove('hidden');
-    slipAnalysisResult.innerHTML = '<div class="p-4 text-center bg-gray-800 rounded-lg"><div class="loading-spinner" style="width:24px;height:24px"></div><p class="text-xs mt-2 text-gray-400">Analyzing betslip...</p></div>';
-
-    try {
+        const formData = new FormData();
+        formData.append('slip_text', text);
+        
         const response = await fetch('/api/analyze-slip', {
             method: 'POST',
             body: formData
         });
-        const data = await response.json();
-
-        if (!response.ok || data.error) {
-            slipAnalysisResult.innerHTML = `
-                <div class="selection-row border-red-500/30">
-                    <div class="text-sm text-red-300">${escapeHtml(data.error || 'Betslip analysis failed')}</div>
-                    ${data.ocr_available === false ? '<div class="text-xs text-yellow-300 mt-2">OCR is not installed on this server. Paste the betslip text in the box above and run the analysis again.</div>' : ''}
-                </div>
-            `;
-            return;
+        
+        if (!response.ok) {
+            throw new Error('Slip analysis failed');
         }
-
-        if (!combinedSlipText && data.ocr_text) {
-            slipTextInput.value = data.ocr_text;
-        }
-
-        renderBetslipAnalysis(data);
+        
+        return await response.json();
     } catch (error) {
-        slipAnalysisResult.innerHTML = `<div class="selection-row text-red-300 text-sm">Error: ${escapeHtml(error.message)}</div>`;
+        showToast(error.message, 'error', 'Slip Analysis Error');
+        return null;
     }
 }
 
-function addTypedSlipRow(values = {}) {
-    const row = document.createElement('div');
-    row.className = 'typed-slip-row';
-    row.innerHTML = `
-        <input type="text" class="form-control typed-slip-match" placeholder="Match" value="${escapeAttribute(values.match || '')}">
-        <input type="text" class="form-control typed-slip-selection" placeholder="Pick / market" value="${escapeAttribute(values.selection || '')}">
-        <input type="number" class="form-control typed-slip-odds" step="0.01" min="1.01" placeholder="Odds" value="${escapeAttribute(values.odds || '')}">
-        <button type="button" class="mini-action typed-slip-remove" title="Remove">x</button>
-    `;
+// ============================================
+// UI Rendering
+// ============================================
 
-    row.querySelector('.typed-slip-remove').addEventListener('click', () => {
-        if (typedSlipRows.children.length > 1) {
-            row.remove();
-        } else {
-            row.querySelectorAll('input').forEach(input => {
-                input.value = '';
-            });
-        }
-    });
-
-    typedSlipRows.appendChild(row);
-}
-
-function getTypedSlipText() {
-    const lines = [];
-    typedSlipRows.querySelectorAll('.typed-slip-row').forEach(row => {
-        const match = row.querySelector('.typed-slip-match')?.value.trim();
-        const selection = row.querySelector('.typed-slip-selection')?.value.trim();
-        const odds = parseFloat(row.querySelector('.typed-slip-odds')?.value);
-
-        if (match && selection && odds >= 1.01) {
-            lines.push(`${match} - ${selection} ${odds.toFixed(2)}`);
-        }
-    });
-    return lines.join('\n');
-}
-
-function renderBetslipAnalysis(data) {
-    slipAnalysisResult.innerHTML = `
-        <div class="space-y-3">
-            <div class="selection-row">
-                <div class="text-sm font-bold text-green-300">${escapeHtml(data.summary)}</div>
-                <div class="grid grid-cols-2 gap-2 text-xs mt-3">
-                    ${metricBox('Original Odds', data.original_combined_odds || '-')}
-                    ${metricBox('Suggested Odds', data.suggested_combined_odds || '-')}
-                    ${metricBox('Kept', data.kept_count)}
-                    ${metricBox('Removed', data.removed_count, data.removed_count ? 'text-red-300' : 'text-green-300')}
-                </div>
-                ${data.ocr_available ? '' : '<div class="text-xs text-yellow-300 mt-3">OCR is not installed, so analysis used the text box content.</div>'}
+function renderMatches(matches) {
+    const container = DOM.matchesContainer;
+    if (!container) return;
+    
+    if (!matches || matches.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📭</div>
+                <div class="empty-title">No Matches Found</div>
+                <div class="empty-desc">No matches available for this selection. Try a different sport or site.</div>
             </div>
-            ${renderSlipGroup('Suggested Slip', data.kept, 'keep')}
-            ${renderSlipGroup('Removed Risky Selections', data.removed, 'remove')}
+        `;
+        return;
+    }
+    
+    let html = '<div class="matches-grid">';
+    
+    matches.forEach(match => {
+        const status = match.status || 'Upcoming';
+        const statusClass = status.toLowerCase();
+        const competitionType = match.competition_type || 'Domestic League';
+        const compClass = competitionType.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        const startTime = match.start_time ? formatDate(match.start_time) : 'Date TBD';
+        
+        // Build markets HTML
+        let marketsHtml = '';
+        if (match.markets) {
+            for (const [marketName, outcomes] of Object.entries(match.markets)) {
+                if (typeof outcomes === 'object' && outcomes !== null) {
+                    const oddsHtml = Object.entries(outcomes)
+                        .filter(([_, value]) => value > 0)
+                        .map(([label, value]) => `
+                            <div class="odd-item">
+                                <span class="label">${label}</span>
+                                <span class="value">${value.toFixed(2)}</span>
+                            </div>
+                        `).join('');
+                    
+                    if (oddsHtml) {
+                        marketsHtml += `
+                            <div class="market">
+                                <div class="market-name">${marketName}</div>
+                                <div class="odds">${oddsHtml}</div>
+                            </div>
+                        `;
+                    }
+                }
+            }
+        }
+        
+        html += `
+            <div class="match-card" data-match-id="${match.id}">
+                <span class="status-badge ${statusClass}">${status}</span>
+                
+                <div class="match-header">
+                    <div class="match-teams">
+                        ${match.home_team} <span class="vs">vs</span> ${match.away_team}
+                    </div>
+                </div>
+                
+                <div class="match-league">
+                    ${match.league || 'Unknown League'}
+                    <span class="competition-badge competition-${compClass}">${competitionType}</span>
+                </div>
+                
+                <div class="match-meta">
+                    <span class="status">
+                        <span class="dot ${statusClass}"></span>
+                        ${status}
+                    </span>
+                    <span class="date-time">📅 ${startTime}</span>
+                </div>
+                
+                ${marketsHtml ? `<div class="markets">${marketsHtml}</div>` : ''}
+                
+                <div class="match-actions">
+                    <button class="btn btn-primary analyze-match-btn" data-match-id="${match.id}">
+                        🤖 AI Analysis
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+    
+    // Attach event listeners to analyze buttons
+    container.querySelectorAll('.analyze-match-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const matchId = parseInt(btn.dataset.matchId);
+            const match = AppState.matches.find(m => m.id === matchId);
+            if (match) {
+                await handleMatchAnalysis(match);
+            }
+        });
+    });
+}
+
+function renderStats(matches) {
+    const countEl = DOM.matchCount;
+    const valueEl = DOM.valueBetCount;
+    
+    if (countEl) countEl.textContent = matches?.length || 0;
+    if (valueEl) valueEl.textContent = matches?.length || 0; // Will be updated after analysis
+}
+
+function renderAISelection(analysis) {
+    const container = DOM.aiSelectionContainer;
+    if (!container) return;
+    
+    if (!analysis || !analysis.ai_selection) {
+        container.innerHTML = `
+            <div class="content">
+                Select a match and click "AI Analysis" to see the best value bet.
+            </div>
+        `;
+        return;
+    }
+    
+    const bet = analysis.ai_selection;
+    container.innerHTML = `
+        <div class="title">
+            <span class="ai-icon">🧠</span>
+            AI Selection
+        </div>
+        <div class="content" style="flex-direction: column; text-align: left; align-items: flex-start; gap: 8px;">
+            <div><span class="highlight">Match:</span> ${analysis.match}</div>
+            <div><span class="highlight">Market:</span> ${bet.market}</div>
+            <div><span class="highlight">Outcome:</span> ${bet.outcome}</div>
+            <div><span class="highlight">Odds:</span> ${bet.odds}</div>
+            <div><span class="highlight">Value Edge:</span> <span class="${bet.value_edge > 5 ? 'text-success' : 'text-warning'}">${bet.value_edge}%</span></div>
+            <div><span class="highlight">Confidence:</span> ${bet.confidence}%</div>
+            <div><span class="highlight">Suggested Stake:</span> $${bet.suggested_stake}</div>
+            <div><span class="highlight">Recommendation:</span> ${bet.recommendation}</div>
         </div>
     `;
 }
 
-function renderSlipGroup(title, selections = [], type = 'keep') {
-    if (!selections.length) {
-        return `
-            <div class="selection-row">
-                <div class="text-xs text-gray-400">${escapeHtml(title)}</div>
-                <div class="text-sm mt-1">${type === 'keep' ? 'No selections passed the risk filter.' : 'No risky selections removed.'}</div>
+function renderAnalysisResults(analysis) {
+    const container = DOM.analysisResults;
+    if (!container) return;
+    
+    if (!analysis) {
+        container.classList.remove('visible');
+        return;
+    }
+    
+    container.classList.add('visible');
+    
+    let html = `
+        <h3>🔍 Analysis: ${analysis.match}</h3>
+        <div class="result-item">
+            <span class="key">Total Markets</span>
+            <span class="value">${analysis.total_markets}</span>
+        </div>
+        <div class="result-item">
+            <span class="key">Value Bets Found</span>
+            <span class="value positive">${analysis.value_bets_count}</span>
+        </div>
+    `;
+    
+    if (analysis.ai_selection) {
+        const bet = analysis.ai_selection;
+        html += `
+            <div class="result-item" style="border-top: 2px solid #2a3a5a; margin-top: 8px; padding-top: 12px;">
+                <span class="key">🏆 Best Bet</span>
+                <span class="value positive">${bet.outcome} @ ${bet.odds}</span>
+            </div>
+            <div class="result-item">
+                <span class="key">Value Edge</span>
+                <span class="value ${bet.value_edge > 5 ? 'positive' : 'neutral'}">${bet.value_edge}%</span>
+            </div>
+            <div class="result-item">
+                <span class="key">Confidence</span>
+                <span class="value">${bet.confidence}%</span>
+            </div>
+            <div class="result-item">
+                <span class="key">Suggested Stake</span>
+                <span class="value">$${bet.suggested_stake}</span>
+            </div>
+            <div class="result-item">
+                <span class="key">Recommendation</span>
+                <span class="value ${bet.value_edge > 5 ? 'positive' : 'neutral'}">${bet.recommendation}</span>
             </div>
         `;
     }
+    
+    container.innerHTML = html;
+}
 
-    return `
-        <div class="space-y-2">
-            <div class="text-xs uppercase tracking-wide text-gray-400">${escapeHtml(title)}</div>
-            ${selections.map(selection => `
-                <div class="selection-row">
-                    <div class="flex justify-between gap-3">
-                        <div>
-                            <div class="font-semibold text-sm">${escapeHtml(selection.match)}</div>
-                            <div class="text-xs text-gray-400">${escapeHtml(selection.selection)} · ${escapeHtml(selection.market)}</div>
-                        </div>
-                        <div class="text-right">
-                            <div class="font-bold ${type === 'keep' ? 'text-green-300' : 'text-red-300'}">${selection.odds}</div>
-                            <div class="text-xs text-gray-400">${selection.confidence}% conf.</div>
-                        </div>
+// ============================================
+// Date Formatting
+// ============================================
+
+function formatDate(dateStr) {
+    try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return 'Date TBD';
+        
+        const now = new Date();
+        const diff = date - now;
+        
+        // If date is in the past
+        if (diff < 0) {
+            return `📅 ${date.toLocaleDateString()} ${date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+        }
+        
+        // If date is within 24 hours
+        if (diff < 24 * 60 * 60 * 1000) {
+            const hours = Math.floor(diff / (60 * 60 * 1000));
+            if (hours < 1) {
+                const minutes = Math.floor(diff / (60 * 1000));
+                return `⏰ ${minutes}m from now`;
+            }
+            return `⏰ ${hours}h from now`;
+        }
+        
+        // Future date
+        const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+        if (days < 7) {
+            return `📅 ${date.toLocaleDateString('en-US', {weekday: 'short'})} ${date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+        }
+        
+        return `📅 ${date.toLocaleDateString()} ${date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+    } catch {
+        return 'Date TBD';
+    }
+}
+
+// ============================================
+// Event Handlers
+// ============================================
+
+async function handleRefresh() {
+    const site = AppState.currentSite;
+    const sport = AppState.currentSport;
+    const league = AppState.currentLeague;
+    
+    try {
+        const data = await fetchMatches(site, sport, league);
+        renderMatches(data.matches);
+        renderStats(data.matches);
+        
+        // Update match count
+        const countEl = DOM.matchCount;
+        if (countEl) countEl.textContent = data.count || 0;
+        
+        showToast(`Loaded ${data.count || 0} matches`, 'success', 'Refreshed');
+    } catch (error) {
+        showToast('Failed to refresh matches', 'error', 'Refresh Error');
+    }
+}
+
+async function handleSiteChange() {
+    const site = DOM.siteSelect.value;
+    AppState.currentSite = site;
+    
+    // Update sports dropdown
+    const sports = await fetchSports(site);
+    if (DOM.sportSelect) {
+        DOM.sportSelect.innerHTML = sports.map(s => 
+            `<option value="${s.id}">${s.name} ${s.live_feed ? '🔴' : ''}</option>`
+        ).join('');
+    }
+    
+    // Update leagues dropdown
+    const sport = AppState.currentSport;
+    const leagues = await fetchLeagues(site, sport);
+    if (DOM.leagueSelect) {
+        DOM.leagueSelect.innerHTML = `
+            <option value="">All Leagues</option>
+            ${leagues.map(l => 
+                `<option value="${l.key}">${l.name} (${l.region})</option>`
+            ).join('')}
+        `;
+    }
+    
+    await handleRefresh();
+}
+
+async function handleSportChange() {
+    const sport = DOM.sportSelect.value;
+    AppState.currentSport = sport;
+    
+    // Update leagues dropdown
+    const site = AppState.currentSite;
+    const leagues = await fetchLeagues(site, sport);
+    if (DOM.leagueSelect) {
+        DOM.leagueSelect.innerHTML = `
+            <option value="">All Leagues</option>
+            ${leagues.map(l => 
+                `<option value="${l.key}">${l.name} (${l.region})</option>`
+            ).join('')}
+        `;
+    }
+    
+    await handleRefresh();
+}
+
+async function handleLeagueChange() {
+    AppState.currentLeague = DOM.leagueSelect.value || null;
+    await handleRefresh();
+}
+
+async function handleMatchAnalysis(match) {
+    try {
+        showToast('Analyzing match...', 'info', 'AI Analysis');
+        const analysis = await analyzeMatch(match);
+        if (analysis) {
+            renderAISelection(analysis);
+            renderAnalysisResults(analysis);
+            showToast('Analysis complete!', 'success', 'AI Analysis');
+        }
+    } catch (error) {
+        showToast('Analysis failed', 'error', 'AI Analysis');
+    }
+}
+
+async function handleAnalyzeAll() {
+    const matches = AppState.matches;
+    if (!matches || matches.length === 0) {
+        showToast('No matches to analyze', 'error', 'Analysis Error');
+        return;
+    }
+    
+    try {
+        setLoading(true);
+        const siteName = DOM.siteSelect.options[DOM.siteSelect.selectedIndex]?.text || 'Unknown';
+        const results = await analyzeAllMatches(matches, siteName);
+        
+        if (results) {
+            // Update value bet count
+            const valueEl = DOM.valueBetCount;
+            if (valueEl) valueEl.textContent = results.total_value_bets || 0;
+            
+            showToast(`Found ${results.total_value_bets} value bets!`, 'success', 'Analysis Complete');
+            
+            // Show top bets in AI selection
+            if (results.top_bets && results.top_bets.length > 0) {
+                const topBet = results.top_bets[0];
+                DOM.aiSelectionContainer.innerHTML = `
+                    <div class="title">
+                        <span class="ai-icon">🏆</span>
+                        Top Value Bet
                     </div>
-                    <div class="grid grid-cols-2 gap-2 text-xs mt-2">
-                        <div>Win prob: <span class="font-mono">${selection.true_probability}%</span></div>
-                        <div>Lose prob: <span class="font-mono">${selection.losing_probability}%</span></div>
-                        <div>Edge: <span class="font-mono ${selection.value_edge > 0 ? 'text-green-300' : 'text-red-300'}">${selection.value_edge > 0 ? '+' : ''}${selection.value_edge}%</span></div>
-                        <div>Stake: <span class="font-mono">KES ${selection.suggested_stake}</span></div>
+                    <div class="content" style="flex-direction: column; text-align: left; align-items: flex-start; gap: 8px;">
+                        <div><span class="highlight">Match:</span> ${topBet.match_name}</div>
+                        <div><span class="highlight">Market:</span> ${topBet.market}</div>
+                        <div><span class="highlight">Outcome:</span> ${topBet.outcome}</div>
+                        <div><span class="highlight">Odds:</span> ${topBet.odds}</div>
+                        <div><span class="highlight">Value Edge:</span> <span class="${topBet.value_edge > 5 ? 'text-success' : 'text-warning'}">${topBet.value_edge}%</span></div>
+                        <div><span class="highlight">Confidence:</span> ${topBet.confidence}%</div>
+                        <div><span class="highlight">Suggested Stake:</span> $${topBet.suggested_stake}</div>
+                        <div><span class="highlight">Recommendation:</span> ${topBet.recommendation}</div>
                     </div>
-                    <div class="text-xs text-gray-400 mt-2">${escapeHtml(selection.reason)}</div>
-                </div>
-            `).join('')}
-        </div>
-    `;
+                `;
+            }
+        }
+    } catch (error) {
+        showToast('Failed to analyze matches', 'error', 'Analysis Error');
+    } finally {
+        setLoading(false);
+    }
 }
 
-function setupEventListeners() {
-    siteSearchInput.addEventListener('input', event => {
-        const query = event.target.value.toLowerCase().trim();
-        const filtered = supportedSites.filter(site =>
-            site.name.toLowerCase().includes(query) ||
-            site.country.toLowerCase().includes(query)
-        );
-        renderSites(filtered);
-    });
-
-    refreshBtn.addEventListener('click', loadMatches);
-    analyzeAllBtn.addEventListener('click', analyzeAllMatches);
+async function handleCustomPredict() {
+    const home = DOM.manualHome?.value?.trim() || 'Home';
+    const away = DOM.manualAway?.value?.trim() || 'Away';
+    const market = DOM.manualMarket?.value || '1X2';
+    const outcome = DOM.manualOutcome?.value?.trim() || '';
+    const odds = parseFloat(DOM.manualOdds?.value);
+    
+    if (!outcome) {
+        showToast('Please enter an outcome (e.g., Home, Draw, Away)', 'error', 'Missing Field');
+        return;
+    }
+    
+    if (isNaN(odds) || odds <= 0) {
+        showToast('Please enter valid odds (e.g., 2.50)', 'error', 'Invalid Odds');
+        return;
+    }
+    
+    try {
+        setLoading(true);
+        const result = await customPredict(home, away, market, outcome, odds);
+        
+        if (result) {
+            const container = DOM.manualResults;
+            if (container) {
+                container.innerHTML = `
+                    <div class="result-item"><span class="key">Match</span><span class="value">${result.match}</span></div>
+                    <div class="result-item"><span class="key">Market</span><span class="value">${result.market}</span></div>
+                    <div class="result-item"><span class="key">Outcome</span><span class="value">${result.outcome}</span></div>
+                    <div class="result-item"><span class="key">Odds</span><span class="value">${result.odds}</span></div>
+                    <div class="result-item"><span class="key">Implied Probability</span><span class="value">${result.implied_probability}%</span></div>
+                    <div class="result-item"><span class="key">True Probability</span><span class="value">${result.true_probability}%</span></div>
+                    <div class="result-item"><span class="key">Value Edge</span><span class="value ${result.value_edge > 5 ? 'positive' : result.value_edge > 2 ? 'neutral' : 'negative'}">${result.value_edge}%</span></div>
+                    <div class="result-item"><span class="key">Confidence</span><span class="value">${result.confidence}%</span></div>
+                    <div class="result-item"><span class="key">Suggested Stake</span><span class="value">$${result.suggested_stake}</span></div>
+                    <div class="result-item" style="border-top: 2px solid #2a3a5a; margin-top: 8px; padding-top: 12px;">
+                        <span class="key">AI Prediction</span>
+                        <span class="value">${result.ai_prediction}</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="key">Recommendation</span>
+                        <span class="value ${result.value_edge > 5 ? 'positive' : result.value_edge > 2 ? 'neutral' : 'negative'}">${result.recommendation}</span>
+                    </div>
+                `;
+                container.classList.add('visible');
+            }
+            showToast('Prediction complete!', 'success', 'Manual Prediction');
+        }
+    } catch (error) {
+        showToast('Prediction failed', 'error', 'Error');
+    } finally {
+        setLoading(false);
+    }
 }
 
-function encodeForInlineJson(value) {
-    return JSON.stringify(value).replace(/"/g, '&quot;');
+async function handleSlipAnalysis() {
+    const text = DOM.slipInput?.value?.trim();
+    if (!text) {
+        showToast('Please paste your betslip text', 'error', 'Missing Input');
+        return;
+    }
+    
+    try {
+        setLoading(true);
+        const result = await analyzeSlip(text);
+        
+        if (result) {
+            const container = DOM.slipResults;
+            if (container) {
+                let html = `
+                    <div class="result-item"><span class="key">Total Selections</span><span class="value">${result.total_selections}</span></div>
+                    <div class="result-item"><span class="key">Kept</span><span class="value positive">${result.kept_count}</span></div>
+                    <div class="result-item"><span class="key">Removed</span><span class="value negative">${result.removed_count}</span></div>
+                    <div class="result-item"><span class="key">Original Combined Odds</span><span class="value">${result.original_combined_odds}</span></div>
+                    <div class="result-item"><span class="key">Suggested Combined Odds</span><span class="value positive">${result.suggested_combined_odds}</span></div>
+                    <div class="result-item"><span class="key">Average Confidence</span><span class="value">${result.average_confidence}%</span></div>
+                    <div class="result-item" style="border-top: 2px solid #2a3a5a; margin-top: 8px; padding-top: 12px;">
+                        <span class="key">Summary</span>
+                        <span class="value">${result.summary}</span>
+                    </div>
+                `;
+                container.innerHTML = html;
+                container.classList.add('visible');
+            }
+            showToast('Betslip analysis complete!', 'success', 'Betslip Analysis');
+        }
+    } catch (error) {
+        showToast('Betslip analysis failed', 'error', 'Error');
+    } finally {
+        setLoading(false);
+    }
 }
 
-function escapeHtml(value) {
-    if (value === null || value === undefined) return '';
-    return String(value).replace(/[&<>"']/g, char => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    }[char]));
+// ============================================
+// Auto-Refresh
+// ============================================
+
+function toggleAutoRefresh() {
+    AppState.autoRefresh = !AppState.autoRefresh;
+    
+    if (AppState.autoRefresh) {
+        if (DOM.autoRefreshToggle) {
+            DOM.autoRefreshToggle.textContent = '⏸️ Auto-Refresh On';
+            DOM.autoRefreshToggle.classList.add('btn-success');
+        }
+        AppState.refreshInterval = setInterval(handleRefresh, 60000); // 60 seconds
+        showToast('Auto-refresh enabled (every 60s)', 'info', 'Auto-Refresh');
+    } else {
+        if (DOM.autoRefreshToggle) {
+            DOM.autoRefreshToggle.textContent = '▶️ Auto-Refresh Off';
+            DOM.autoRefreshToggle.classList.remove('btn-success');
+        }
+        clearInterval(AppState.refreshInterval);
+        showToast('Auto-refresh disabled', 'info', 'Auto-Refresh');
+    }
 }
 
-function escapeAttribute(value) {
-    return escapeHtml(value).replace(/`/g, '&#096;');
+// ============================================
+// Initialization
+// ============================================
+
+async function init() {
+    // Load sites
+    const sites = await fetchSites();
+    if (DOM.siteSelect) {
+        DOM.siteSelect.innerHTML = sites.map(s => 
+            `<option value="${s.id}" ${s.is_default ? 'selected' : ''}>${s.flag} ${s.name}</option>`
+        ).join('');
+    }
+    
+    // Load sports
+    const sports = await fetchSports(AppState.currentSite);
+    if (DOM.sportSelect) {
+        DOM.sportSelect.innerHTML = sports.map(s => 
+            `<option value="${s.id}" ${s.id === 'football' ? 'selected' : ''}>${s.icon} ${s.name}</option>`
+        ).join('');
+    }
+    
+    // Load leagues
+    const leagues = await fetchLeagues(AppState.currentSite, AppState.currentSport);
+    if (DOM.leagueSelect) {
+        DOM.leagueSelect.innerHTML = `
+            <option value="">All Leagues</option>
+            ${leagues.map(l => 
+                `<option value="${l.key}">${l.name} (${l.region})</option>`
+            ).join('')}
+        `;
+    }
+    
+    // Set up event listeners
+    DOM.siteSelect?.addEventListener('change', handleSiteChange);
+    DOM.sportSelect?.addEventListener('change', handleSportChange);
+    DOM.leagueSelect?.addEventListener('change', handleLeagueChange);
+    DOM.refreshBtn?.addEventListener('click', handleRefresh);
+    DOM.analyzeAllBtn?.addEventListener('click', handleAnalyzeAll);
+    DOM.autoRefreshToggle?.addEventListener('click', toggleAutoRefresh);
+    DOM.manualPredictBtn?.addEventListener('click', handleCustomPredict);
+    DOM.slipAnalyzeBtn?.addEventListener('click', handleSlipAnalysis);
+    
+    // Load initial matches
+    await handleRefresh();
+    
+    // Set live status
+    if (DOM.liveStatus) {
+        DOM.liveStatus.textContent = '✅ Live Feeds Active';
+    }
+    if (DOM.statusDot) {
+        DOM.statusDot.className = 'status-dot live';
+    }
+    
+    console.log('🚀 BetAnalyzer initialized!');
 }
 
-window.selectSite = selectSite;
-window.selectSport = selectSport;
-window.analyzeMatch = analyzeMatch;
-
-init();
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', init);
