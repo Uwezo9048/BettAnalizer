@@ -183,47 +183,53 @@ class OddsAPIIO:
             return []
     
     def _standardize_event(self, game: Dict, sport_key: str, league_name: str) -> Optional[Dict]:
-        """Convert API response to your app's format with date and status"""
+        """Convert API response to your app's format with date and status - Timezone safe"""
         try:
+            from datetime import datetime, timezone, timedelta
+            
             home_team = game.get('home_team', 'Home')
             away_team = game.get('away_team', 'Away')
             
             if home_team == 'Home' or away_team == 'Away':
                 return None
             
-            # Get match date
+            # Get match date with timezone handling
             commence_time = game.get('commence_time')
             if commence_time:
                 try:
-                    # Parse and standardize date
                     if isinstance(commence_time, str):
-                        match_datetime = commence_time
+                        clean_time = commence_time.replace('Z', '+00:00')
+                        match_datetime = datetime.fromisoformat(clean_time)
                     else:
-                        match_datetime = commence_time.isoformat() if hasattr(commence_time, 'isoformat') else str(commence_time)
+                        match_datetime = commence_time
+                    
+                    # Ensure timezone-aware
+                    if hasattr(match_datetime, 'tzinfo') and match_datetime.tzinfo is None:
+                        match_datetime = match_datetime.replace(tzinfo=timezone.utc)
+                    
+                    match_datetime_str = match_datetime.isoformat()
                 except:
-                    match_datetime = datetime.now().isoformat()
+                    match_datetime = datetime.now(timezone.utc)
+                    match_datetime_str = match_datetime.isoformat()
             else:
                 # Generate a realistic date
                 import random
                 days_ahead = random.randint(0, 14)
                 hours = random.randint(10, 22)
                 minutes = random.choice([0, 15, 30, 45])
-                match_datetime = (datetime.now() + timedelta(days=days_ahead, hours=hours, minutes=minutes)).isoformat()
+                match_datetime = datetime.now(timezone.utc) + timedelta(days=days_ahead, hours=hours, minutes=minutes)
+                match_datetime_str = match_datetime.isoformat()
             
-            # Determine match status
-            try:
-                start = datetime.fromisoformat(match_datetime.replace('Z', '+00:00'))
-                now = datetime.now(timezone.utc)
-                if start < now:
-                    if start > now - timedelta(hours=2):
-                        status = 'Live'
-                    else:
-                        status = 'Finished'
-                elif start < now + timedelta(hours=1):
+            # Determine match status using timezone-aware comparison
+            now = datetime.now(timezone.utc)
+            if match_datetime < now:
+                if match_datetime > now - timedelta(hours=2):
                     status = 'Live'
                 else:
-                    status = 'Upcoming'
-            except:
+                    status = 'Finished'
+            elif match_datetime < now + timedelta(hours=1):
+                status = 'Live'
+            else:
                 status = 'Upcoming'
             
             # Extract markets
@@ -266,16 +272,20 @@ class OddsAPIIO:
                 'live': False,
                 'from_api': True,
                 'source': 'the_odds_api_global',
-                'start_time': match_datetime,
+                'start_time': match_datetime_str,
                 'status': status,
                 'competition_type': competition_type,
-                'last_updated': datetime.now().isoformat()
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
+            print(f"[DEBUG] Error standardizing event: {e}")
             return None
     
     def _get_competition_type(self, league_name: str) -> str:
         """Determine competition type based on league name"""
+        if not league_name:
+            return 'Domestic League'
+            
         league_lower = league_name.lower()
         
         if 'world cup' in league_lower:

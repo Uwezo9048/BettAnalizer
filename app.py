@@ -46,7 +46,7 @@ def get_supported_sites():
         'default': 'sportybet',
         'live_api_available': API_AVAILABLE,
         'count': len(sites),
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
 @app.route('/api/sports')
@@ -61,7 +61,7 @@ def get_supported_sports():
         'sports': sports,
         'default': 'football',
         'count': len(sports),
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
 @app.route('/api/leagues')
@@ -74,7 +74,7 @@ def get_supported_leagues():
     return jsonify({
         'leagues': leagues,
         'count': len(leagues),
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
 @app.route('/api/matches', methods=['POST'])
@@ -110,40 +110,33 @@ def get_matches():
                 'data_source': 'unsupported',
                 'api_available': API_AVAILABLE and LIVE_FEEDS_ENABLED,
                 'message': f"{sport_info['name']} feed is not connected yet.",
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             })
 
         # Fetch matches
         matches = fetcher.fetch_live_odds(site_id, sport, league_filter)
         
-        # Add match dates and times
+        # Ensure all matches have timezone-aware dates
         for match in matches:
-            if 'start_time' not in match or not match['start_time']:
-                # Generate a realistic date for upcoming matches
-                import random
-                from datetime import timedelta
-                days_ahead = random.randint(0, 14)
-                hours = random.randint(10, 22)
-                minutes = random.choice([0, 15, 30, 45])
-                match['start_time'] = (datetime.now() + timedelta(days=days_ahead, hours=hours, minutes=minutes)).isoformat()
-                
-                # Add match status
-                if days_ahead == 0:
-                    match['status'] = 'Live' if random.random() > 0.7 else 'Upcoming'
-                else:
-                    match['status'] = 'Upcoming'
-            else:
-                # Determine status based on start time
-                start = datetime.fromisoformat(match['start_time'].replace('Z', '+00:00'))
-                if start < datetime.now(timezone.utc):
-                    match['status'] = 'Finished' if random.random() > 0.3 else 'Live'
-                elif start < datetime.now(timezone.utc) + timedelta(hours=1):
-                    match['status'] = 'Live'
-                else:
-                    match['status'] = 'Upcoming'
+            if 'start_time' in match and match['start_time']:
+                try:
+                    # Ensure the date is timezone-aware
+                    clean_time = match['start_time'].replace('Z', '+00:00')
+                    dt = datetime.fromisoformat(clean_time)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    match['start_time'] = dt.isoformat()
+                except:
+                    # If parsing fails, set to current time
+                    match['start_time'] = datetime.now(timezone.utc).isoformat()
             
-            # Add competition type
-            match['competition_type'] = fetcher._get_competition_type(match.get('league', ''))
+            # Ensure status is set
+            if 'status' not in match:
+                match['status'] = fetcher._determine_match_status(match.get('start_time'))
+            
+            # Ensure competition type is set
+            if 'competition_type' not in match:
+                match['competition_type'] = fetcher._get_competition_type(match.get('league', ''))
         
         # Filter by league if specified
         if league_filter:
@@ -166,7 +159,7 @@ def get_matches():
             'is_real_odds': not is_sample_data,
             'data_source': data_source,
             'api_available': API_AVAILABLE and LIVE_FEEDS_ENABLED,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
         
     except Exception as e:
@@ -187,7 +180,7 @@ def analyze_match():
         
         return jsonify({
             'analysis': analysis,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
         
     except Exception as e:
@@ -223,7 +216,7 @@ def analyze_all_matches():
             'total_matches': len(matches),
             'total_value_bets': len(all_bets),
             'top_bets': all_bets[:15],
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
         
     except Exception as e:
@@ -322,7 +315,7 @@ def analyze_betslip():
             'removed': removed,
             'all_selections': analyzed,
             'summary': _build_betslip_summary(len(analyzed), kept, removed, original_odds, suggested_odds),
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     except Exception as e:
@@ -339,7 +332,7 @@ def api_status():
         'supported_sports': list(SUPPORTED_SPORTS.keys()),
         'live_feeds_active': LIVE_FEEDS_ENABLED,
         'data_source': 'multi_source_integration',
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
 @app.route('/api/debug-status')
@@ -357,7 +350,7 @@ def debug_status():
             'ODDS_API_IO_KEY': '***' if os.environ.get('ODDS_API_IO_KEY') else 'Not Set',
         },
         'python_version': sys.version,
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'note': 'Multi-source integration with match dates and multiple competitions'
     })
 
@@ -368,7 +361,7 @@ def health():
         'status': 'healthy',
         'api_available': API_AVAILABLE,
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     }), 200
 
 # ========== Helper Functions ==========

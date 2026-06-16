@@ -413,7 +413,7 @@ class LiveOddsFetcher:
             "site": "sportybet",
             "live": False,
             "source": "sportybet_multi_region",
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         }
 
     def _fetch_api_football(self, sport):
@@ -477,7 +477,7 @@ class LiveOddsFetcher:
                         home = fixture.get('teams', {}).get('home', {}).get('name', 'Home')
                         away = fixture.get('teams', {}).get('away', {}).get('name', 'Away')
                         league_name = fixture.get('league', {}).get('name', comp['name'])
-                        fixture_date = fixture.get('fixture', {}).get('date', datetime.now().isoformat())
+                        fixture_date = fixture.get('fixture', {}).get('date', datetime.now(timezone.utc).isoformat())
                         
                         if home and away and home != 'Home' and away != 'Away':
                             all_matches.append({
@@ -494,7 +494,7 @@ class LiveOddsFetcher:
                                 'start_time': fixture_date,
                                 'status': self._determine_match_status(fixture_date),
                                 'competition_type': self._get_competition_type(league_name),
-                                'last_updated': datetime.now().isoformat()
+                                'last_updated': datetime.now(timezone.utc).isoformat()
                             })
             
             return all_matches
@@ -549,7 +549,7 @@ class LiveOddsFetcher:
                         league = event.get('strLeague', comp['name'])
                         date = event.get('dateEvent', datetime.now().strftime('%Y-%m-%d'))
                         time = event.get('strTime', '15:00:00')
-                        match_datetime = f"{date}T{time}Z"
+                        match_datetime = f"{date}T{time}:00Z"
                         
                         if home and away and home != 'Home' and away != 'Away':
                             all_matches.append({
@@ -566,7 +566,7 @@ class LiveOddsFetcher:
                                 'start_time': match_datetime,
                                 'status': self._determine_match_status(match_datetime),
                                 'competition_type': self._get_competition_type(league),
-                                'last_updated': datetime.now().isoformat()
+                                'last_updated': datetime.now(timezone.utc).isoformat()
                             })
             
             return all_matches
@@ -593,7 +593,7 @@ class LiveOddsFetcher:
                         home = match.get('team1', {}).get('teamName', 'Home')
                         away = match.get('team2', {}).get('teamName', 'Away')
                         league_name = match.get('leagueName', 'Bundesliga')
-                        match_date = match.get('matchDateTime', datetime.now().isoformat())
+                        match_date = match.get('matchDateTime', datetime.now(timezone.utc).isoformat())
                         
                         if home and away and home != 'Home' and away != 'Away':
                             all_matches.append({
@@ -610,7 +610,7 @@ class LiveOddsFetcher:
                                 'start_time': match_date,
                                 'status': self._determine_match_status(match_date),
                                 'competition_type': self._get_competition_type(league_name),
-                                'last_updated': datetime.now().isoformat()
+                                'last_updated': datetime.now(timezone.utc).isoformat()
                             })
             
             return all_matches
@@ -635,7 +635,7 @@ class LiveOddsFetcher:
         ]
         
         matches = []
-        start_date = datetime.now()
+        start_date = datetime.now(timezone.utc)
         
         for i in range(10):
             if len(teams) < 2:
@@ -648,9 +648,9 @@ class LiveOddsFetcher:
             away_team = teams.pop(away_idx) if teams else "FC Opponent"
             
             # Generate match date (next Saturday or Sunday)
-            days_until_weekend = (5 - datetime.now().weekday()) % 7
+            days_until_weekend = (5 - datetime.now(timezone.utc).weekday()) % 7
             if days_until_weekend == 0:
-                days_until_weekend = 2  # If today is Saturday, next weekend is 7 days
+                days_until_weekend = 2
             match_date = start_date + timedelta(days=days_until_weekend + (i * 7))
             match_time = f"{random.randint(10, 16)}:{random.choice(['00', '30'])}:00"
             match_datetime = f"{match_date.strftime('%Y-%m-%d')}T{match_time}Z"
@@ -673,7 +673,7 @@ class LiveOddsFetcher:
                 'start_time': match_datetime,
                 'status': self._determine_match_status(match_datetime),
                 'competition_type': 'Sunday League',
-                'last_updated': datetime.now().isoformat()
+                'last_updated': datetime.now(timezone.utc).isoformat()
             })
         
         return matches
@@ -691,7 +691,6 @@ class LiveOddsFetcher:
         # Ensure odds are balanced
         total_implied = (1/home_odds + 1/draw_odds + 1/away_odds)
         if total_implied > 1.2:
-            # Adjust to keep bookmaker margin reasonable
             margin = 1.1
             home_odds = round(home_odds / (total_implied / margin), 2)
             draw_odds = round(draw_odds / (total_implied / margin), 2)
@@ -730,21 +729,54 @@ class LiveOddsFetcher:
         return sport_ids.get(sport, "sr:sport:1")
 
     def _generate_match_date(self, event):
-        """Generate a realistic match date"""
-        import random
-        from datetime import timedelta
-        
-        days_ahead = random.randint(0, 7)
-        hours = random.randint(10, 22)
-        minutes = random.choice([0, 15, 30, 45])
-        return (datetime.now() + timedelta(days=days_ahead, hours=hours, minutes=minutes)).isoformat()
+        """Generate a realistic match date - timezone aware"""
+        try:
+            import random
+            from datetime import datetime, timedelta, timezone
+            
+            days_ahead = random.randint(0, 7)
+            hours = random.randint(10, 22)
+            minutes = random.choice([0, 15, 30, 45])
+            match_date = datetime.now(timezone.utc) + timedelta(days=days_ahead, hours=hours, minutes=minutes)
+            return match_date.isoformat()
+        except:
+            return datetime.now(timezone.utc).isoformat()
 
     def _determine_match_status(self, start_time_str):
-        """Determine if match is Live, Upcoming, or Finished"""
+        """Determine if match is Live, Upcoming, or Finished - Timezone safe"""
         try:
-            start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+            from datetime import datetime, timezone, timedelta
+            
+            # Handle None or empty
+            if not start_time_str:
+                return 'Upcoming'
+            
+            # Parse the start time
+            if isinstance(start_time_str, str):
+                # Handle ISO format with Z or +00:00
+                clean_time = start_time_str.replace('Z', '+00:00')
+                try:
+                    start_time = datetime.fromisoformat(clean_time)
+                except ValueError:
+                    # Try other common formats
+                    try:
+                        from dateutil import parser
+                        start_time = parser.parse(start_time_str)
+                    except ImportError:
+                        # Fallback without dateutil
+                        start_time = datetime.now(timezone.utc) + timedelta(days=1)
+                        start_time = start_time.replace(tzinfo=timezone.utc)
+            else:
+                start_time = start_time_str
+            
+            # Ensure timezone-aware (assume UTC if naive)
+            if hasattr(start_time, 'tzinfo') and start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
+            
+            # Get current UTC time
             now = datetime.now(timezone.utc)
             
+            # Compare with UTC
             if start_time < now:
                 if start_time > now - timedelta(hours=2):
                     return 'Live'
@@ -754,11 +786,16 @@ class LiveOddsFetcher:
                 return 'Live'
             else:
                 return 'Upcoming'
-        except:
+                
+        except Exception as e:
+            print(f"[DEBUG] Error determining status: {e}")
             return 'Upcoming'
 
     def _get_competition_type(self, league_name):
         """Determine competition type based on league name"""
+        if not league_name:
+            return 'Domestic League'
+            
         league_lower = league_name.lower()
         
         if 'world cup' in league_lower or 'worldcup' in league_lower:
