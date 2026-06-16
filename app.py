@@ -365,6 +365,44 @@ def health():
         'timestamp': datetime.now().isoformat()
     }), 200
 
+@app.route('/api/test-odds-api')
+def test_odds_api():
+    """Test The Odds API directly on Render"""
+    try:
+        import requests
+        api_key = os.environ.get('ODDS_API_IO_KEY', '')
+        
+        # Test with a league that should have matches
+        test_leagues = [
+            'soccer_australia_aleague',
+            'soccer_australia_npl_queensland',
+            'soccer_epl',
+            'soccer_spain_la_liga',
+        ]
+        
+        results = {}
+        for league in test_leagues:
+            url = f"https://api.the-odds-api.com/v4/sports/{league}/odds"
+            params = {
+                'apiKey': api_key,
+                'regions': 'us,uk,eu,au',
+                'markets': 'h2h',
+                'oddsFormat': 'decimal'
+            }
+            response = requests.get(url, params=params, timeout=10)
+            results[league] = {
+                'status': response.status_code,
+                'count': len(response.json()) if response.status_code == 200 else 0,
+                'message': response.text[:200] if response.status_code != 200 else 'OK'
+            }
+        
+        return jsonify({
+            'api_key_set': bool(api_key),
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 # ========== Helper Functions ==========
 
 def _ocr_available():
