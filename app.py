@@ -34,47 +34,54 @@ fetcher = get_fetcher()
 # ========== FORCE TESSERACT PATH ==========
 import pytesseract
 
-# Set Tesseract path for different environments
-TESSERACT_PATHS = [
-    # Windows paths
-    r'C:\Program Files\Tesseract-OCR\tesseract.exe',
-    r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
-    # Linux paths (Render)
-    '/usr/bin/tesseract',
-    '/usr/local/bin/tesseract',
-    # macOS paths
-    '/opt/homebrew/bin/tesseract',
-    '/usr/local/Cellar/tesseract/*/bin/tesseract',
-]
-
-# Check if running on Render
+# OVERRIDE: Force correct path for Render (Linux)
 if os.environ.get('RENDER') == 'true':
-    print("[OCR] Running on Render - using Linux paths")
-    # Try common Linux paths first
-    linux_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract']
-    for path in linux_paths:
-        if os.path.exists(path):
-            pytesseract.pytesseract.tesseract_cmd = path
-            print(f"✅ Tesseract found at: {path}")
-            break
+    # Override any Windows path with Linux path
+    linux_tesseract = '/usr/bin/tesseract'
+    if os.path.exists(linux_tesseract):
+        pytesseract.pytesseract.tesseract_cmd = linux_tesseract
+        os.environ['TESSERACT_CMD'] = linux_tesseract
+        print(f"[OCR] Render detected - using: {linux_tesseract}")
     else:
-        print("⚠️ Tesseract not found on Render. OCR will not work.")
+        # Try alternative Linux paths
+        alt_paths = ['/usr/local/bin/tesseract', '/opt/render/project/src/.venv/bin/tesseract']
+        for path in alt_paths:
+            if os.path.exists(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                os.environ['TESSERACT_CMD'] = path
+                print(f"[OCR] Render detected - using: {path}")
+                break
+        else:
+            print("[OCR] Tesseract not found on Render. Try installing with build.sh")
 else:
-    # Local Windows
-    for path in TESSERACT_PATHS:
-        if os.path.exists(path):
-            pytesseract.pytesseract.tesseract_cmd = path
-            print(f"✅ Tesseract found at: {path}")
-            break
+    # Local Windows/Linux/macOS
+    TESSERACT_PATHS = [
+        # Windows paths
+        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+        # Linux paths
+        '/usr/bin/tesseract',
+        '/usr/local/bin/tesseract',
+        # macOS paths
+        '/opt/homebrew/bin/tesseract',
+        '/usr/local/Cellar/tesseract/*/bin/tesseract',
+    ]
+    
+    # First check environment variable
+    env_path = os.environ.get('TESSERACT_CMD')
+    if env_path and os.path.exists(env_path):
+        pytesseract.pytesseract.tesseract_cmd = env_path
+        print(f"✅ Tesseract found at: {env_path}")
     else:
-        # Try environment variable
-        env_path = os.environ.get('TESSERACT_CMD')
-        if env_path and os.path.exists(env_path):
-            pytesseract.pytesseract.tesseract_cmd = env_path
-            print(f"✅ Tesseract found at: {env_path}")
+        # Check common paths
+        for path in TESSERACT_PATHS:
+            if os.path.exists(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                os.environ['TESSERACT_CMD'] = path
+                print(f"✅ Tesseract found at: {path}")
+                break
         else:
             print("⚠️ Tesseract not found. OCR will not work.")
-
 # ========== Routes ==========
 
 @app.route('/')
@@ -314,17 +321,27 @@ def custom_predict():
 
 def _get_tesseract_command():
     """Get tesseract command path - cross-platform"""
-    # First check environment variable
-    env_cmd = os.environ.get('TESSERACT_CMD')
-    if env_cmd and os.path.exists(env_cmd):
-        return env_cmd
-    
-    # Check if on Render
+    # First check if on Render
     if os.environ.get('RENDER') == 'true':
+        # Force Linux path on Render
         linux_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract']
         for path in linux_paths:
             if os.path.exists(path):
                 return path
+        # If not found, try to find it
+        try:
+            import subprocess
+            result = subprocess.run(['which', 'tesseract'], capture_output=True, text=True)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except:
+            pass
+        return None
+    
+    # First check environment variable
+    env_cmd = os.environ.get('TESSERACT_CMD')
+    if env_cmd and os.path.exists(env_cmd):
+        return env_cmd
     
     # Check common Windows paths
     windows_paths = [
