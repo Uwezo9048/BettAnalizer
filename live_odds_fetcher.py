@@ -1,13 +1,10 @@
 """
 Live Odds Fetcher for Supported Betting Sites
-Uses direct SportyBet API with sample data fallback
+Uses Odds-API.io as primary source with SportyBet fallback and sample data
 """
 
 import json
 import os
-import queue
-import sys
-import threading
 import time
 from datetime import datetime
 
@@ -22,7 +19,7 @@ LIVE_FEEDS_ENABLED = os.environ.get("RENDER") == "true" or _live_feeds_setting i
 # Disable OddsAfrica-API completely to avoid dependency issues
 API_AVAILABLE = False
 API_INSTANCES = {}
-API_IMPORT_ERROR = "OddsAfrica-API disabled - using direct SportyBet API"
+API_IMPORT_ERROR = "OddsAfrica-API disabled - using Odds-API.io + SportyBet + sample data"
 
 # Supported betting sites with live feed capability
 SUPPORTED_LIVE_SITES = {
@@ -88,16 +85,45 @@ SPORTYBET_SPORT_IDS = {
     "darts": "sr:sport:22",
 }
 
-print("ℹ️  Running in direct API mode (OddsAfrica-API disabled)")
+print("ℹ️  Running with Odds-API.io + SportyBet + sample data")
+
 
 class LiveOddsFetcher:
-    """Fetches live odds from supported betting sites"""
+    """Fetches live odds from multiple sources: Odds-API.io, SportyBet, and sample data"""
     
     def __init__(self):
         self.cache = {}
         self.cache_duration = 60  # seconds
         self.live_fetch_timeout = 10
+        self._odds_api_io = None
         
+    def _get_odds_api_io(self):
+        """Lazy load Odds-API.io client"""
+        if self._odds_api_io is None:
+            try:
+                # Try different import paths
+                try:
+                    from odds_api_io import OddsAPIIO
+                except ImportError:
+                    try:
+                        from odds_api import OddsAPIIO
+                    except ImportError:
+                        from odds_api_io import OddsAPIIO
+                
+                self._odds_api_io = OddsAPIIO()
+                if self._odds_api_io.client:
+                    print("[DEBUG] Odds-API.io client initialized")
+                else:
+                    print("[DEBUG] Odds-API.io client not available - check API key")
+                    self._odds_api_io = False
+            except ImportError:
+                print("[DEBUG] Odds-API.io module not available")
+                self._odds_api_io = False
+            except Exception as e:
+                print(f"[DEBUG] Error initializing Odds-API.io: {e}")
+                self._odds_api_io = False
+        return self._odds_api_io
+    
     def get_supported_sites(self):
         """Return list of sites with live feed capability"""
         sites = []
@@ -128,7 +154,10 @@ class LiveOddsFetcher:
     
     def fetch_live_odds(self, site_id, sport="football"):
         """
-        Fetch live odds - tries SportyBet direct API first, then sample data
+        Fetch live odds - tries multiple sources in order:
+        1. Odds-API.io (real odds with value detection)
+        2. SportyBet direct API
+        3. Sample data (fallback)
         
         Args:
             site_id: Site identifier (sportybet, bet9ja, etc.)
@@ -149,24 +178,80 @@ class LiveOddsFetcher:
 
         print(f"[DEBUG] Fetching odds for {site_id} - {sport}")
         
-        # Try SportyBet direct API
+        # TRY 1: Odds-API.io (primary source)
         try:
+            print("[DEBUG] Trying Odds-API.io...")
+            api = self._get_odds_api_io()
+            if api and api.client:
+                matches = api.get_live_events(sport, limit=30)
+                if matches:
+                    print(f"[DEBUG] ✅ Found {len(matches)} matches from Odds-API.io")
+                    self.cache[cache_key] = (time.time(), matches)
+                    return matches
+                else:
+                    print("[DEBUG] Odds-API.io returned no matches")
+        except Exception as e:
+            print(f"[DEBUG] Odds-API.io failed: {e}")
+        
+        # TRY 2: SportyBet direct API
+        try:
+            print("[DEBUG] Trying SportyBet direct API...")
             matches = self._fetch_sportybet_direct(sport)
             if matches and not self._is_sample_data(matches):
-                print(f"[DEBUG] Found {len(matches)} real matches from SportyBet")
+                print(f"[DEBUG] ✅ Found {len(matches)} real matches from SportyBet")
                 self.cache[cache_key] = (time.time(), matches)
                 return matches
+            elif matches:
+                print("[DEBUG] SportyBet returned SRL data, trying fallback...")
         except Exception as e:
             print(f"[DEBUG] SportyBet direct API failed: {e}")
         
-        # Fallback to sample data
+        # FALLBACK: Sample data
         print(f"[DEBUG] Using sample data for {site_id}")
         sample_data = self._get_sample_data(site_id)
         self.cache[cache_key] = (time.time(), sample_data)
         return sample_data
 
+    def fetch_value_bets(self, bookmaker: str = None, limit: int = 20):
+        """
+        Fetch value bet recommendations from Odds-API.io
+        
+        Args:
+            bookmaker: Specific bookmaker to check (e.g., 'bet365', 'pinnacle')
+            limit: Maximum number of value bets to return
+        
+        Returns:
+            List of value bet opportunities
+        """
+        try:
+            api = self._get_odds_api_io()
+            if api and api.client:
+                return api.get_value_bets(bookmaker, limit)
+        except Exception as e:
+            print(f"[DEBUG] Error fetching value bets: {e}")
+        return []
+
+    def fetch_arbitrage_opportunities(self, bookmakers: str = "bet365,pinnacle", limit: int = 10):
+        """
+        Fetch arbitrage opportunities from Odds-API.io
+        
+        Args:
+            bookmakers: Comma-separated list of bookmakers
+            limit: Maximum number of opportunities to return
+        
+        Returns:
+            List of arbitrage opportunities
+        """
+        try:
+            api = self._get_odds_api_io()
+            if api and api.client:
+                return api.get_arbitrage_opportunities(bookmakers, limit)
+        except Exception as e:
+            print(f"[DEBUG] Error fetching arbitrage opportunities: {e}")
+        return []
+
     def _fetch_sportybet_direct(self, sport):
-        """Fetch SportyBet Kenya events directly"""
+        """Fetch SportyBet Kenya events directly - Updated endpoints"""
         sport_id = SPORTYBET_SPORT_IDS.get(sport)
         if not sport_id:
             return []
@@ -180,9 +265,10 @@ class LiveOddsFetcher:
             "Operid": "1",
         }
         
+        # Try different SportyBet API endpoints - remove the broken one
         endpoints = [
-            "https://www.sportybet.com/api/ke/factsCenter/liveEvents",
             "https://www.sportybet.com/api/ke/factsCenter/liveOrPrematchEvents",
+            "https://www.sportybet.com/api/ke/factsCenter/importantEvents",
         ]
         
         params = {
@@ -194,6 +280,7 @@ class LiveOddsFetcher:
 
         for endpoint in endpoints:
             try:
+                print(f"[DEBUG] Trying SportyBet endpoint: {endpoint}")
                 response = requests.get(
                     endpoint, 
                     headers=headers, 
@@ -204,6 +291,7 @@ class LiveOddsFetcher:
                 payload = response.json()
                 
                 if payload.get("bizCode") != 10000:
+                    print(f"[DEBUG] SportyBet API returned bizCode: {payload.get('bizCode')}")
                     continue
 
                 for tournament in payload.get("data") or []:
@@ -228,7 +316,7 @@ class LiveOddsFetcher:
                 continue
 
         matches = list(events_by_id.values())
-        print(f"[DEBUG] Found {len(matches)} real matches")
+        print(f"[DEBUG] Found {len(matches)} matches from SportyBet")
         return matches[:50]
 
     def _parse_sportybet_event(self, event, tournament_name):
@@ -298,11 +386,13 @@ class LiveOddsFetcher:
         return False
 
     def _get_sample_data(self, site_id):
-        """Return realistic sample data"""
+        """Return realistic sample data with many leagues and matches"""
         site_info = SUPPORTED_LIVE_SITES.get(site_id, {})
         site_name = site_info.get("name", site_id)
+        now = datetime.now().isoformat()
         
         return [
+            # English Premier League
             {
                 "id": 1,
                 "home_team": "Liverpool",
@@ -317,11 +407,44 @@ class LiveOddsFetcher:
                 "site": site_id,
                 "live": False,
                 "sample": True,
-                "last_updated": datetime.now().isoformat(),
+                "last_updated": now,
                 "note": f"Demo data for {site_name}"
             },
             {
                 "id": 2,
+                "home_team": "Manchester City",
+                "away_team": "Chelsea",
+                "league": "English Premier League",
+                "country": "England",
+                "markets": {
+                    "1X2": {"Home": 1.65, "Draw": 3.80, "Away": 4.50},
+                    "Over/Under": {"Over 2.5": 1.70, "Under 2.5": 2.10},
+                    "GG/NG": {"Yes": 1.80, "No": 1.95}
+                },
+                "site": site_id,
+                "live": False,
+                "sample": True,
+                "last_updated": now
+            },
+            {
+                "id": 3,
+                "home_team": "Manchester United",
+                "away_team": "Tottenham",
+                "league": "English Premier League",
+                "country": "England",
+                "markets": {
+                    "1X2": {"Home": 2.20, "Draw": 3.50, "Away": 2.90},
+                    "Over/Under": {"Over 2.5": 1.85, "Under 2.5": 1.95},
+                    "GG/NG": {"Yes": 1.60, "No": 2.20}
+                },
+                "site": site_id,
+                "live": False,
+                "sample": True,
+                "last_updated": now
+            },
+            # La Liga
+            {
+                "id": 4,
                 "home_team": "Real Madrid",
                 "away_team": "Atletico Madrid",
                 "league": "La Liga",
@@ -334,10 +457,27 @@ class LiveOddsFetcher:
                 "site": site_id,
                 "live": False,
                 "sample": True,
-                "last_updated": datetime.now().isoformat()
+                "last_updated": now
             },
             {
-                "id": 3,
+                "id": 5,
+                "home_team": "Barcelona",
+                "away_team": "Real Sociedad",
+                "league": "La Liga",
+                "country": "Spain",
+                "markets": {
+                    "1X2": {"Home": 1.50, "Draw": 4.20, "Away": 5.50},
+                    "Over/Under": {"Over 2.5": 1.75, "Under 2.5": 2.05},
+                    "GG/NG": {"Yes": 1.70, "No": 2.10}
+                },
+                "site": site_id,
+                "live": False,
+                "sample": True,
+                "last_updated": now
+            },
+            # Bundesliga
+            {
+                "id": 6,
                 "home_team": "Bayern Munich",
                 "away_team": "Borussia Dortmund",
                 "league": "Bundesliga",
@@ -350,26 +490,27 @@ class LiveOddsFetcher:
                 "site": site_id,
                 "live": False,
                 "sample": True,
-                "last_updated": datetime.now().isoformat()
+                "last_updated": now
             },
             {
-                "id": 4,
-                "home_team": "PSG",
-                "away_team": "Marseille",
-                "league": "Ligue 1",
-                "country": "France",
+                "id": 7,
+                "home_team": "RB Leipzig",
+                "away_team": "Bayer Leverkusen",
+                "league": "Bundesliga",
+                "country": "Germany",
                 "markets": {
-                    "1X2": {"Home": 1.45, "Draw": 4.50, "Away": 6.00},
-                    "Over/Under": {"Over 2.5": 1.60, "Under 2.5": 2.25},
+                    "1X2": {"Home": 2.30, "Draw": 3.60, "Away": 2.70},
+                    "Over/Under": {"Over 2.5": 1.80, "Under 2.5": 2.00},
                     "GG/NG": {"Yes": 1.65, "No": 2.15}
                 },
                 "site": site_id,
                 "live": False,
                 "sample": True,
-                "last_updated": datetime.now().isoformat()
+                "last_updated": now
             },
+            # Serie A
             {
-                "id": 5,
+                "id": 8,
                 "home_team": "AC Milan",
                 "away_team": "Inter Milan",
                 "league": "Serie A",
@@ -382,7 +523,56 @@ class LiveOddsFetcher:
                 "site": site_id,
                 "live": False,
                 "sample": True,
-                "last_updated": datetime.now().isoformat()
+                "last_updated": now
+            },
+            {
+                "id": 9,
+                "home_team": "Juventus",
+                "away_team": "Napoli",
+                "league": "Serie A",
+                "country": "Italy",
+                "markets": {
+                    "1X2": {"Home": 2.10, "Draw": 3.40, "Away": 3.20},
+                    "Over/Under": {"Over 2.5": 1.90, "Under 2.5": 1.90},
+                    "GG/NG": {"Yes": 1.80, "No": 1.95}
+                },
+                "site": site_id,
+                "live": False,
+                "sample": True,
+                "last_updated": now
+            },
+            # Ligue 1
+            {
+                "id": 10,
+                "home_team": "PSG",
+                "away_team": "Marseille",
+                "league": "Ligue 1",
+                "country": "France",
+                "markets": {
+                    "1X2": {"Home": 1.45, "Draw": 4.50, "Away": 6.00},
+                    "Over/Under": {"Over 2.5": 1.60, "Under 2.5": 2.25},
+                    "GG/NG": {"Yes": 1.65, "No": 2.15}
+                },
+                "site": site_id,
+                "live": False,
+                "sample": True,
+                "last_updated": now
+            },
+            {
+                "id": 11,
+                "home_team": "Lyon",
+                "away_team": "Monaco",
+                "league": "Ligue 1",
+                "country": "France",
+                "markets": {
+                    "1X2": {"Home": 2.05, "Draw": 3.60, "Away": 3.20},
+                    "Over/Under": {"Over 2.5": 1.85, "Under 2.5": 1.95},
+                    "GG/NG": {"Yes": 1.70, "No": 2.05}
+                },
+                "site": site_id,
+                "live": False,
+                "sample": True,
+                "last_updated": now
             }
         ]
 

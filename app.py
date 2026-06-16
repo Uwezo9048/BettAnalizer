@@ -102,8 +102,9 @@ def get_matches():
         first_match = matches[0] if matches else {}
         is_sample_data = bool(first_match.get('sample', False))
         is_stored_data = bool(first_match.get('from_storage', False))
+        is_from_api = bool(first_match.get('from_api', False))
         is_live_data = bool(matches) and LIVE_FEEDS_ENABLED and not is_sample_data and not is_stored_data
-        data_source = 'live' if is_live_data else 'stored' if is_stored_data else 'sample' if is_sample_data else 'empty'
+        data_source = 'live' if is_live_data else 'api' if is_from_api else 'stored' if is_stored_data else 'sample' if is_sample_data else 'empty'
         
         return jsonify({
             'site': site_id,
@@ -173,6 +174,44 @@ def analyze_all_matches():
             'timestamp': datetime.now().isoformat()
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/value-bets', methods=['POST'])
+def get_value_bets():
+    """Get value bet recommendations from Odds-API.io"""
+    try:
+        data = request.json or {}
+        bookmaker = data.get('bookmaker')
+        limit = data.get('limit', 20)
+        
+        value_bets = fetcher.fetch_value_bets(bookmaker, limit)
+        
+        return jsonify({
+            'value_bets': value_bets,
+            'count': len(value_bets),
+            'source': 'odds-api-io',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/arbitrage', methods=['POST'])
+def get_arbitrage():
+    """Get arbitrage opportunities from Odds-API.io"""
+    try:
+        data = request.json or {}
+        bookmakers = data.get('bookmakers', 'bet365,pinnacle')
+        limit = data.get('limit', 10)
+        
+        opportunities = fetcher.fetch_arbitrage_opportunities(bookmakers, limit)
+        
+        return jsonify({
+            'opportunities': opportunities,
+            'count': len(opportunities),
+            'source': 'odds-api-io',
+            'timestamp': datetime.now().isoformat()
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -284,7 +323,7 @@ def api_status():
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
         'supported_sites': list(SUPPORTED_LIVE_SITES.keys()),
         'live_feeds_active': LIVE_FEEDS_ENABLED,
-        'data_source': 'direct_sportybet_api_with_sample_fallback',
+        'data_source': 'odds_api_io_with_sportybet_fallback',
         'timestamp': datetime.now().isoformat()
     })
 
@@ -293,17 +332,27 @@ def debug_status():
     """Debug endpoint to check what's happening on Render"""
     import sys
     
+    # Check if Odds-API.io is available
+    odds_api_io_available = False
+    try:
+        from odds_api_io import OddsAPIIO
+        odds_api_io_available = True
+    except ImportError:
+        pass
+    
     return jsonify({
         'api_available': API_AVAILABLE,
         'api_import_error': API_IMPORT_ERROR,
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
+        'odds_api_io_available': odds_api_io_available,
         'environment': {
             'RENDER': os.environ.get('RENDER'),
             'LIVE_FEEDS_ENABLED': os.environ.get('LIVE_FEEDS_ENABLED'),
+            'ODDS_API_IO_KEY': '***' if os.environ.get('ODDS_API_IO_KEY') else 'Not Set',
         },
         'python_version': sys.version,
         'timestamp': datetime.now().isoformat(),
-        'note': 'Using direct SportyBet API with sample data fallback'
+        'note': 'Using Odds-API.io as primary source with SportyBet fallback'
     })
 
 @app.route('/health')
