@@ -9,6 +9,7 @@ from flask_cors import CORS
 import os
 import re
 import shutil
+import sys
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
@@ -33,27 +34,46 @@ fetcher = get_fetcher()
 # ========== FORCE TESSERACT PATH ==========
 import pytesseract
 
-# Set Tesseract path explicitly for Windows
+# Set Tesseract path for different environments
 TESSERACT_PATHS = [
+    # Windows paths
     r'C:\Program Files\Tesseract-OCR\tesseract.exe',
     r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+    # Linux paths (Render)
     '/usr/bin/tesseract',
     '/usr/local/bin/tesseract',
+    # macOS paths
+    '/opt/homebrew/bin/tesseract',
+    '/usr/local/Cellar/tesseract/*/bin/tesseract',
 ]
 
-for path in TESSERACT_PATHS:
-    if os.path.exists(path):
-        pytesseract.pytesseract.tesseract_cmd = path
-        print(f"✅ Tesseract found at: {path}")
-        break
-else:
-    # Try environment variable
-    env_path = os.environ.get('TESSERACT_CMD')
-    if env_path and os.path.exists(env_path):
-        pytesseract.pytesseract.tesseract_cmd = env_path
-        print(f"✅ Tesseract found at: {env_path}")
+# Check if running on Render
+if os.environ.get('RENDER') == 'true':
+    print("[OCR] Running on Render - using Linux paths")
+    # Try common Linux paths first
+    linux_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract']
+    for path in linux_paths:
+        if os.path.exists(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            print(f"✅ Tesseract found at: {path}")
+            break
     else:
-        print("⚠️ Tesseract not found. OCR will not work.")
+        print("⚠️ Tesseract not found on Render. OCR will not work.")
+else:
+    # Local Windows
+    for path in TESSERACT_PATHS:
+        if os.path.exists(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            print(f"✅ Tesseract found at: {path}")
+            break
+    else:
+        # Try environment variable
+        env_path = os.environ.get('TESSERACT_CMD')
+        if env_path and os.path.exists(env_path):
+            pytesseract.pytesseract.tesseract_cmd = env_path
+            print(f"✅ Tesseract found at: {env_path}")
+        else:
+            print("⚠️ Tesseract not found. OCR will not work.")
 
 # ========== Routes ==========
 
@@ -293,13 +313,20 @@ def custom_predict():
 # ========== OCR Helper Functions ==========
 
 def _get_tesseract_command():
-    """Get tesseract command path - Windows optimized"""
+    """Get tesseract command path - cross-platform"""
     # First check environment variable
     env_cmd = os.environ.get('TESSERACT_CMD')
     if env_cmd and os.path.exists(env_cmd):
         return env_cmd
     
-    # Check common Windows paths first
+    # Check if on Render
+    if os.environ.get('RENDER') == 'true':
+        linux_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract']
+        for path in linux_paths:
+            if os.path.exists(path):
+                return path
+    
+    # Check common Windows paths
     windows_paths = [
         r'C:\Program Files\Tesseract-OCR\tesseract.exe',
         r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
@@ -333,7 +360,7 @@ def _get_tesseract_command():
     return None
 
 def _ocr_available():
-    """Check if OCR is available - Windows optimized"""
+    """Check if OCR is available - cross-platform"""
     try:
         import pytesseract
         from PIL import Image
@@ -586,17 +613,17 @@ def api_status():
 @app.route('/api/debug-status')
 def debug_status():
     """Debug endpoint"""
-    import sys
     
     # Check OCR status
     ocr_available = _ocr_available()
+    tesseract_path = _get_tesseract_command()
     
     return jsonify({
         'api_available': API_AVAILABLE,
         'api_import_error': API_IMPORT_ERROR,
         'live_feeds_enabled': LIVE_FEEDS_ENABLED,
         'ocr_available': ocr_available,
-        'tesseract_path': _get_tesseract_command(),
+        'tesseract_path': tesseract_path,
         'environment': {
             'RENDER': os.environ.get('RENDER'),
             'LIVE_FEEDS_ENABLED': os.environ.get('LIVE_FEEDS_ENABLED'),
